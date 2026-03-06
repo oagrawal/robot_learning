@@ -1,0 +1,75 @@
+############################
+# Environments
+############################
+venv/
+.venv/
+env/
+ENV/
+
+############################
+# Python build / packaging
+############################
+build/
+dist/
+*.egg-info/
+
+############################
+# Python caches / tooling
+############################
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+############################
+# Jupyter
+############################
+.ipynb_checkpoints/
+
+############################
+# Editors / OS
+############################
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+############################
+# Secrets
+############################
+.env
+.env.*
+
+############################
+# Data / large artifacts (ML/RL)
+############################
+*.hdf5
+*.h5
+*.npy
+*.npz
+*.pkl
+*.pickle
+*.pt
+*.pth
+*.ckpt
+*.onnx
+
+data/
+datasets/
+
+############################
+# Experiment outputs / logs
+############################
+wandb/
+runs/
+logs/
+tb_logs/
+tensorboard/
+checkpoints/
+outputs/
+multirun/
+.hydra/
