@@ -1,0 +1,4 @@
+- download hdf5 file on this server
+- get ipynb file on this server and run
+- edit the flow_policy_config file from ShivanDass's imitation learning repo
+- try to train the policy
