@@ -11,10 +11,13 @@ Quick start for setting up this repo on a new machine.
 
 ## Setup
 
-### 1. Create and activate a Python virtual environment
+### 1. Create and activate a Python 3.10 virtual environment
+
+**Required:** Use Python 3.10 (Python 3.14+ is not supported—mujoco and other deps lack wheels).
 
 ```bash
-python3 -m venv venv
+# If python3.10 is not installed: brew install python@3.10
+python3.10 -m venv venv
 source venv/bin/activate  # Linux/macOS
 ```
 
@@ -33,57 +36,26 @@ This repo already contains `mimicgen/`, `robomimic/`, and `imitation/` as subdir
 From the repo root (where `square_d0.hdf5` lives), just install the packages:
 
 ```bash
-# robosuite from PyPI
-pip install robosuite
+# robosuite (robot simulation framework) - clone for editable install so you can modify if needed
+cd robosuite && pip install -e . && cd ..
 
 # local packages from this repo (editable mode)
+pip install -r imitation/requirements.txt
 pip install -e mimicgen
 pip install -e robomimic
 pip install -e imitation
 ```
 
-### 4. Edit the config before training
-
-**Important:** Update `imitation/imitation/config/model/flow_policy_config.py`:
-
-1. **`output_dir`** in `train_config` – set to your experiments path, e.g.:
-   ```python
-   output_dir="/path/to/your/repo/experiments"
-   ```
-
-2. **`data`** in `data_config` – set to your HDF5 path, e.g.:
-   ```python
-   data=["/path/to/your/repo/square_d0.hdf5"]
-   ```
-
-Replace `/path/to/your/repo` with the absolute path to this repo on your machine.
 
 ### 5. (Optional) wandb login
 
 For training logs:
 
 ```bash
+pip install --upgrade wandb
 wandb login
 ```
 
 Paste your 40-character API key from https://wandb.ai/authorize (the key only, not the URL).
 
-## Running
 
-**Option A: Jupyter notebook**
-
-1. Update `DATASET_PATH` and `BASE_DIR` in the first cell of `Imitation-Learning-with-Negative-Examples.ipynb` to match your paths.
-2. Run the notebook. Skip cells marked "SKIP" if mimicgen/robomimic/imitation are already cloned and installed.
-3. Skip the "Blackwell PyTorch" cell if you have A100 or other standard GPUs.
-
-**Option B: Command line**
-
-```bash
-cd imitation/imitation
-python scripts/train.py --exp_name baseline_square --config config/model/flow_policy_config.py
-```
-
-## Notes
-
-- **GPU:** A100 and similar GPUs use standard PyTorch; no need for the Blackwell nightly build.
-- **num_workers:** In `flow_policy_config.py`, `num_workers` in `data_config` can be tuned to your CPU core count (default 16).
