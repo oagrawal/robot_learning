@@ -74,7 +74,7 @@ class BaseAlgo(nn.Module):
     @staticmethod
     def load_weights(path):
         if os.path.exists(path):
-            kwargs, state = torch.load(path, weights_only=False)
+            kwargs, state = torch.load(path, weights_only=False, map_location="cpu")
             config = kwargs['config']
             device = kwargs['device']
             
