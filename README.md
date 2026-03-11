@@ -30,6 +30,10 @@ pip install imageio imageio-ffmpeg
 # Robosuite undeclared dependency
 pip install termcolor
 
+# Address setuptools and numpy dependency breaks
+pip install "setuptools<70.0.0"
+pip install "numpy<2" "opencv-python<4.10"
+
 # Install imitation as editable
 pip install -e imitation/
 ```
@@ -39,6 +43,10 @@ pip install -e imitation/
 ```bash
 pip install gdown
 gdown 1paIqhdqswq4-a-KZoBGey0BH9s7x_k9B  # Download square_d0.hdf5 dataset
+
+# Move the dataset logically inside the imitation module
+mkdir -p imitation/imitation/data
+mv square_d0.hdf5 imitation/imitation/data/
 ```
 
 ## Running Evaluation
@@ -51,6 +59,25 @@ python eval_square_d0.py \
     --save_video \
     --video_dir rollout_videos
 ```
+
+## Running Training
+
+To configure your Python path and train the Flow Matching model on the `square_d0` dataset:
+
+```bash
+# Execute the training script
+python imitation/imitation/scripts/train.py \
+    --exp_name baseline_square \
+    --config imitation/imitation/config/model/flow_policy_config.py
+```
+
+### Running Remotely in Background (`tmux`)
+
+To ensure training survives SSH disconnections:
+1. Start a new session: `tmux new -s flow_training`
+2. Run the training command above
+3. Detach and leave it running: Press `Ctrl+B`, release, then press `D`
+4. Reattach later: `tmux attach -t flow_training`
 
 ## Key Dependency Notes
 
