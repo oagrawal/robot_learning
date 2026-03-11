@@ -83,6 +83,8 @@ def run_rollouts(policy, n_rollouts, max_steps, save_video, video_dir):
                 frames.append(obs["agentview_image"].copy())
 
             action = policy.get_action(obs)
+            if action.ndim > 1:
+                action = action.squeeze()
             obs, _reward, done, _info = env.step(action)
 
             if env.check_success():
