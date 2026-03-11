@@ -34,6 +34,13 @@ pip install termcolor
 pip install -e imitation/
 ```
 
+## Download the Dataset / Checkpoints
+
+```bash
+pip install gdown
+gdown 1paIqhdqswq4-a-KZoBGey0BH9s7x_k9B  # Download square_d0.hdf5 dataset
+```
+
 ## Running Evaluation
 
 ```bash
