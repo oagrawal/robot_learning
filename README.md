@@ -43,6 +43,7 @@ gdown 1paIqhdqswq4-a-KZoBGey0BH9s7x_k9B  # Download square_d0.hdf5 dataset
 
 ## Running Evaluation
 
+### Standard Evaluation
 ```bash
 python eval_square_d0.py \
     --checkpoint weights_ep900.pth \
@@ -50,6 +51,11 @@ python eval_square_d0.py \
     --max_steps 400 \
     --save_video \
     --video_dir rollout_videos
+```
+
+### Minimal Evaluation (Hardcoded Config)
+```bash
+python minimal_eval.py
 ```
 
 ## Key Dependency Notes
