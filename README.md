@@ -5,9 +5,9 @@ Evaluation of a Flow Matching policy trained on the `square_d0` MimicGen dataset
 ## Environment Setup
 
 ```bash
-# Create a Python 3.10 venv (required — pinned deps don't have py3.12 wheels)
-/opt/homebrew/bin/python3.10 -m venv venv
-source venv/bin/activate
+# Create a Conda environment with Python 3.10 (required — pinned deps don't have py3.12 wheels)
+conda create -n flow-learning python=3.10 -y
+conda activate flow-learning
 ```
 
 ## Install Dependencies

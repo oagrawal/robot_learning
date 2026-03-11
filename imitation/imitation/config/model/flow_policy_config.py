@@ -17,9 +17,9 @@ train_config = AttrDict(
     num_epochs=1000,
     epoch_every_n_steps=500,
     log_every_n_epochs=1,
-    val_every_n_epochs=50,
+    val_every_n_epochs=25,
     save_every_n_epochs=50,
-    eval_every_n_epochs=25,
+    eval_every_n_epochs=50,
     seed=1
 )
 
@@ -143,15 +143,29 @@ observation_config = AttrDict(
 #     # evaluator_configs=[evaluator_config2],
 # )
 
+from imitation.evaluators.robosuite_evaluator import RobosuiteEvaluator
 
-# from imitation.evaluators.robosuite_evaluator import RobosuiteEvaluator
-# from l2l.config.env.robosuite.multi_stage import env_config
-# evaluator_config = AttrDict(
-#     evaluator=RobosuiteEvaluator,
-#     env_config = env_config,
-#     n_rollouts = 10,
-#     max_steps = 100,
-# )
+env_config = AttrDict(
+    env_name="NutAssemblySquare",
+    robots="Panda",
+    controller_configs=suite.load_controller_config(default_controller="OSC_POSE"),
+    has_renderer=False,
+    has_offscreen_renderer=True,
+    reward_shaping=True,
+    use_camera_obs=True,
+    camera_names=["agentview", "robot0_eye_in_hand"],
+    camera_heights=84,
+    camera_widths=84,
+)
+
+evaluator_config = AttrDict(
+    evaluator=RobosuiteEvaluator,
+    env_config=env_config,
+    n_rollouts=10,
+    max_steps=400,
+    save_video=True,
+    video_folder="rollout_videos"
+)
 
 config = AttrDict(
     train_config=train_config,
