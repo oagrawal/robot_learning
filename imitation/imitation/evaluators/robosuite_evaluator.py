@@ -23,6 +23,8 @@ class RobosuiteEvaluator:
 
             for steps in range(self.max_steps):
                 action = policy.get_action(obs)
+                if action.ndim > 1:
+                    action = action.squeeze()
                 obs, reward, done, _ = self.env.step(action)
                 
                 # self.env.render()
