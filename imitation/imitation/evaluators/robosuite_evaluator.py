@@ -1,4 +1,6 @@
+import os
 import numpy as np
+import imageio
 from tqdm import tqdm
 import robosuite as suite
 from imitation.wrappers.robosuite_wrappers import RobosuiteImageFlipWrapper
@@ -11,9 +13,13 @@ class RobosuiteEvaluator:
 
         self.n_rollouts = eval_config.n_rollouts
         self.max_steps = eval_config.max_steps
+        self.save_video = eval_config.get("save_video", False)
+        self.video_folder = eval_config.get("video_folder", "rollout_videos")
 
     def evaluate(self, policy):
         print("\nEvaluating policy...")
+        if self.save_video:
+            os.makedirs(self.video_folder, exist_ok=True)
 
         success = np.zeros(self.n_rollouts)
         timsteps = np.full((self.n_rollouts,), self.max_steps)
@@ -21,7 +27,11 @@ class RobosuiteEvaluator:
             obs = self.env.reset()
             policy.reset()
 
+            frames = []
             for steps in range(self.max_steps):
+                if self.save_video:
+                    frames.append(obs["agentview_image"].copy())
+
                 action = policy.get_action(obs)
                 if action.ndim > 1:
                     action = action.squeeze()
@@ -32,6 +42,14 @@ class RobosuiteEvaluator:
                     success[n] = 1
                     timsteps[n] = steps
                     break
+            
+            if self.save_video:
+                suffix = "success" if success[n] else "fail"
+                video_path = os.path.join(self.video_folder, f"rollout_{n:03d}_{suffix}.mp4")
+                writer = imageio.get_writer(video_path, fps=30)
+                for frame in frames:
+                    writer.append_data(frame.astype(np.uint8))
+                writer.close()
         
         eval_info = {
             'success_rate': np.mean(success),

@@ -18,6 +18,7 @@ the full policy object without needing a separate config file.
 
 import os
 import argparse
+from datetime import datetime
 import numpy as np
 import torch
 import imageio
@@ -125,6 +126,12 @@ def main():
     args = parser.parse_args()
 
     # ------------------------------------------------------------------
+    # 0. Output directory setup
+    # ------------------------------------------------------------------
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    run_video_dir = os.path.join(args.video_dir, f"run_{timestamp}")
+    
+    # ------------------------------------------------------------------
     # 1. Load policy
     # ------------------------------------------------------------------
     print(f"Loading checkpoint: {args.checkpoint}")
@@ -145,7 +152,7 @@ def main():
         n_rollouts=args.n_rollouts,
         max_steps=args.max_steps,
         save_video=args.save_video,
-        video_dir=args.video_dir,
+        video_dir=run_video_dir,
     )
 
     # ------------------------------------------------------------------

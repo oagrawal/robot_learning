@@ -1,4 +1,5 @@
 import os
+from datetime import datetime
 import torch
 import robosuite as suite
 from imitation.algo.base_algo import BaseAlgo
@@ -21,10 +22,15 @@ def main():
     )
 
     # 2. Evaluator Config (minimalist)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    run_video_dir = os.path.join("rollout_videos", f"run_{timestamp}")
+    
     eval_config = AttrDict(
         env_config=env_config,
         n_rollouts=10,
-        max_steps=400
+        max_steps=400,
+        save_video=True,
+        video_folder=run_video_dir
     )
 
     # 3. Load Policy
