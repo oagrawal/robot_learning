@@ -35,7 +35,7 @@ data_config = AttrDict(
         # "/mnt/hdd2/libero/libero_10/LIVING_ROOM_SCENE5_put_the_white_mug_on_the_left_plate_and_put_the_yellow_and_white_mug_on_the_right_plate_demo.hdf5",
         # "/mnt/hdd2/libero/libero_10/LIVING_ROOM_SCENE6_put_the_white_mug_on_the_plate_and_put_the_chocolate_pudding_to_the_right_of_the_plate_demo.hdf5",
         # "/mnt/hdd2/libero/libero_10/STUDY_SCENE1_pick_up_the_book_and_place_it_in_the_back_compartment_of_the_caddy_demo.hdf5",
-        "/content/square_d0.hdf5"
+        "./data/square_d0.hdf5"
     ],
     dataset_class=SequenceDataset,
     dataset_kwargs=dict(
