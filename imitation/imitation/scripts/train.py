@@ -152,7 +152,11 @@ class Trainer:
 
     def evaluate(self, epoch):
         print("\nEvaluating policy...")
-        return self.evaluator.evaluate(self.model, epoch)
+        self.model.eval()
+        with torch.no_grad():
+            eval_info = self.evaluator.evaluate(self.model, epoch)
+        self.model.train()
+        return eval_info
 
     def create_log(self):
         self.logger = None

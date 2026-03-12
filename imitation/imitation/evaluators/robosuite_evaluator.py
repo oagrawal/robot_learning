@@ -16,10 +16,13 @@ class RobosuiteEvaluator:
         self.save_video = eval_config.get("save_video", False)
         self.video_folder = eval_config.get("video_folder", "rollout_videos")
 
-    def evaluate(self, policy, epoch):
+    def evaluate(self, policy, epoch=None):
         print("\nEvaluating policy...")
         if self.save_video:
-            current_video_folder = os.path.join(self.video_folder, f"epoch_{epoch}")
+            if epoch is not None:
+                current_video_folder = os.path.join(self.video_folder, f"epoch_{epoch}")
+            else:
+                current_video_folder = self.video_folder
             os.makedirs(current_video_folder, exist_ok=True)
 
         success = np.zeros(self.n_rollouts)
