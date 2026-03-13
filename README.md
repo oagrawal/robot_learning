@@ -10,6 +10,32 @@ conda create -n flow-learning python=3.10 -y
 conda activate flow-learning
 ```
 
+## Git LFS (Large File Storage)
+
+This repository uses **Git LFS** to store model weights (`.pth` files). Standard Git is not designed for large binary files; LFS replaces these files with tiny text pointers in GitHub and downloads the actual data only when needed.
+
+### Setup for New Users
+
+Before you can see the actual weight files, you must install and initialize Git LFS on your machine:
+
+**On Linux (Ubuntu):**
+```bash
+sudo apt install git-lfs
+git lfs install
+```
+
+**On macOS:**
+```bash
+brew install git-lfs
+git lfs install
+```
+
+**After installation**, download the actual weights into your local directory:
+```bash
+git lfs pull
+```
+
+
 ## Install Dependencies
 
 ```bash
