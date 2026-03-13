@@ -43,7 +43,7 @@ data_config = AttrDict(
         window_size=window_size,
         action_horizon=action_horizon,
     ),
-    num_workers=16
+    num_workers=20
 )
 
 policy_config = AttrDict(

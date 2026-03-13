@@ -50,7 +50,7 @@ class RobosuiteEvaluator:
             if self.save_video:
                 suffix = "success" if success[n] else "fail"
                 video_path = os.path.join(current_video_folder, f"rollout_{n:03d}_{suffix}.mp4")
-                writer = imageio.get_writer(video_path, fps=30)
+                writer = imageio.get_writer(video_path, fps=30, macro_block_size=1)
                 for frame in frames:
                     writer.append_data(frame.astype(np.uint8))
                 writer.close()
