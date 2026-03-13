@@ -16,10 +16,14 @@ class RobosuiteEvaluator:
         self.save_video = eval_config.get("save_video", False)
         self.video_folder = eval_config.get("video_folder", "rollout_videos")
 
-    def evaluate(self, policy):
+    def evaluate(self, policy, epoch=None):
         print("\nEvaluating policy...")
         if self.save_video:
-            os.makedirs(self.video_folder, exist_ok=True)
+            if epoch is not None:
+                current_video_folder = os.path.join(self.video_folder, f"epoch_{epoch}")
+            else:
+                current_video_folder = self.video_folder
+            os.makedirs(current_video_folder, exist_ok=True)
 
         success = np.zeros(self.n_rollouts)
         timsteps = np.full((self.n_rollouts,), self.max_steps)
@@ -45,8 +49,8 @@ class RobosuiteEvaluator:
             
             if self.save_video:
                 suffix = "success" if success[n] else "fail"
-                video_path = os.path.join(self.video_folder, f"rollout_{n:03d}_{suffix}.mp4")
-                writer = imageio.get_writer(video_path, fps=30)
+                video_path = os.path.join(current_video_folder, f"rollout_{n:03d}_{suffix}.mp4")
+                writer = imageio.get_writer(video_path, fps=30, macro_block_size=1)
                 for frame in frames:
                     writer.append_data(frame.astype(np.uint8))
                 writer.close()

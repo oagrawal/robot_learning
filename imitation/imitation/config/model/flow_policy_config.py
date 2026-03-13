@@ -12,14 +12,14 @@ window_size = 2
 action_horizon = 8
 
 train_config = AttrDict(
-    output_dir="/content/experiments",
+    output_dir="~/robot_learning/experiments",
     batch_size=256,
     num_epochs=1000,
     epoch_every_n_steps=500,
     log_every_n_epochs=1,
-    val_every_n_epochs=50,
+    val_every_n_epochs=25,
     save_every_n_epochs=50,
-    eval_every_n_epochs=25,
+    eval_every_n_epochs=50,
     seed=1
 )
 
@@ -35,7 +35,7 @@ data_config = AttrDict(
         # "/mnt/hdd2/libero/libero_10/LIVING_ROOM_SCENE5_put_the_white_mug_on_the_left_plate_and_put_the_yellow_and_white_mug_on_the_right_plate_demo.hdf5",
         # "/mnt/hdd2/libero/libero_10/LIVING_ROOM_SCENE6_put_the_white_mug_on_the_plate_and_put_the_chocolate_pudding_to_the_right_of_the_plate_demo.hdf5",
         # "/mnt/hdd2/libero/libero_10/STUDY_SCENE1_pick_up_the_book_and_place_it_in_the_back_compartment_of_the_caddy_demo.hdf5",
-        "/content/square_d0.hdf5"
+        "./data/square_d0.hdf5"
     ],
     dataset_class=SequenceDataset,
     dataset_kwargs=dict(
@@ -43,7 +43,7 @@ data_config = AttrDict(
         window_size=window_size,
         action_horizon=action_horizon,
     ),
-    num_workers=16
+    num_workers=20
 )
 
 policy_config = AttrDict(
@@ -143,15 +143,29 @@ observation_config = AttrDict(
 #     # evaluator_configs=[evaluator_config2],
 # )
 
+from imitation.evaluators.robosuite_evaluator import RobosuiteEvaluator
 
-# from imitation.evaluators.robosuite_evaluator import RobosuiteEvaluator
-# from l2l.config.env.robosuite.multi_stage import env_config
-# evaluator_config = AttrDict(
-#     evaluator=RobosuiteEvaluator,
-#     env_config = env_config,
-#     n_rollouts = 10,
-#     max_steps = 100,
-# )
+env_config = AttrDict(
+    env_name="NutAssemblySquare",
+    robots="Panda",
+    controller_configs=suite.load_controller_config(default_controller="OSC_POSE"),
+    has_renderer=False,
+    has_offscreen_renderer=True,
+    reward_shaping=True,
+    use_camera_obs=True,
+    camera_names=["agentview", "robot0_eye_in_hand"],
+    camera_heights=84,
+    camera_widths=84,
+)
+
+evaluator_config = AttrDict(
+    evaluator=RobosuiteEvaluator,
+    env_config=env_config,
+    n_rollouts=10,
+    max_steps=400,
+    save_video=True,
+    video_folder="rollout_videos"
+)
 
 config = AttrDict(
     train_config=train_config,

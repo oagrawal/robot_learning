@@ -11,9 +11,9 @@ from importlib.machinery import SourceFileLoader
 
 DEVICE = 'cuda'
 
-LOG = False
-WANDB_PROJECT_NAME = ''
-WANDB_ENTITY_NAME = ''
+LOG = True
+WANDB_PROJECT_NAME = 'positive-flow-policy'
+WANDB_ENTITY_NAME = 'learning-with-negative-examples'
 
 class Trainer:
 
@@ -29,6 +29,9 @@ class Trainer:
         self.evaluator = None
         if self.evaluator_config:
             self.evaluator = self.evaluator_config.evaluator(eval_config=self.evaluator_config, trainer=self)
+
+        self.best_val_loss = float('inf')
+        self.best_success_rate = 0.0
 
     def train(self, n_epochs):
         self.model.train()
@@ -52,11 +55,21 @@ class Trainer:
                 val_info = self.validate()
                 if self.logger is not None:
                     self.logger.log_scalar_dict(val_info, step=epoch, phase='val')
+
+                # Save best validation model
+                if 'total' in val_info and val_info['total'] < self.best_val_loss:
+                    self.best_val_loss = val_info['total']
+                    self.save_custom_model("best_val_model.pth")
                 
             if (self.evaluator is not None) and self.train_config.eval_every_n_epochs > 0 and (epoch+1) % self.train_config.eval_every_n_epochs == 0:
-                eval_info = self.evaluate()
+                eval_info = self.evaluate(epoch+1)
                 if self.logger is not None:
                     self.logger.log_multi_modal_dict(eval_info, step=epoch, phase='eval')
+
+                # Save best evaluation model
+                if 'success_rate' in eval_info and eval_info['success_rate'] > self.best_success_rate:
+                    self.best_success_rate = eval_info['success_rate']
+                    self.save_custom_model("best_eval_model.pth")
 
             if self.train_config.save_every_n_epochs > 0 and (epoch+1) % self.train_config.save_every_n_epochs == 0:
                 self.save_checkpoint(epoch+1)
@@ -137,16 +150,21 @@ class Trainer:
         self.model.train()
         return val_loss
 
-    def evaluate(self):
+    def evaluate(self, epoch):
         print("\nEvaluating policy...")
-        return self.evaluator.evaluate(self.model)
+        self.model.eval()
+        with torch.no_grad():
+            eval_info = self.evaluator.evaluate(self.model, epoch)
+        self.model.train()
+        return eval_info
 
     def create_log(self):
         self.logger = None
         self.log_path = None
 
         if LOG:
-            self.log_path = os.path.join(self.train_config.output_dir, self.exp_name)
+            output_dir = os.path.expanduser(self.train_config.output_dir)
+            self.log_path = os.path.join(output_dir, self.exp_name)
             # TODO: create weights directory and fix the model save path
             os.makedirs(self.log_path, exist_ok=True)
 
@@ -156,6 +174,12 @@ class Trainer:
         if self.log_path is not None:
             print(f"==> Saving checkpoint at epoch {epoch}")
             self.model.save_weights(epoch, self.log_path)
+            
+    def save_custom_model(self, filename):
+        if self.log_path is not None:
+            print(f"==> Saving custom model: {filename}")
+            filepath = os.path.join(self.log_path, filename)
+            torch.save(self.model.state_dict(), filepath)
 
     def load_config(self, config_path):
         self.conf = SourceFileLoader('conf', config_path).load_module().config
@@ -199,7 +223,7 @@ class Trainer:
         
         if self.train_config.val_every_n_epochs > 0:
             self.val_loader = DataLoader(
-                                self.train_dataset, 
+                                self.val_dataset, 
                                 batch_size=self.train_config.batch_size,
                                 shuffle=True,
                                 num_workers=self.data_config.num_workers)
