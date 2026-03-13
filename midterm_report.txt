@@ -1,0 +1,52 @@
+Project Milestone - Robot Learning
+By Om Agrawal, Ayuj Verma, and Will Peters
+
+
+Overall Goal
+
+We are training a flow matching based imitation learning policy on expert robot demonstrations, and then extending it with contrastive learning so the policy learns not just from successful trajectories but also from failures. The end goal is a robot policy that is more robust because it has been explicitly trained to move away from known failure states, not just toward successful ones. We are working in simulation using the RoboSuite environment, specifically the NutAssemblySquare task from the MimicGen square_d0 dataset.
+
+Current Progress
+
+
+2.1 Getting the Data and Training the Policy
+
+We downloaded the square_d0 dataset from MimicGen as an HDF5 file. This dataset contains expert demonstrations of a Panda arm completing the NutAssemblySquare task. We then trained a flow matching policy on this data using Shivin's imitation learning repo, which is included in our codebase as the imitation/ directory.
+
+[TODO: fill in training details - ayuj handled training and I dont have full details]
+
+Training was done on Colab and was finicky to set up. Despite those difficulties, we were able to download the resulting weights as a .pth file (weights_ep900.pth), which stores both the model config (including architecture kwargs and normalization stats) and the state dict, so it can be loaded without a separate config file.
+
+At this point we also had training MSE logged to Weights and Biases, which gives some signal about how training is going. But training loss alone is not a reliable measure of how good the policy is, because imitation learning policies suffer from compounding errors at rollout time: small mistakes accumulate over a trajectory in ways that never show up in single-step supervised loss. Following advice from Arpit and Bowen, we decided to use rollout success rate as our primary evaluation metric.
+
+2.2 Getting Rollouts Working
+
+Getting rollouts working with video output took several steps. We set up a repo that combines three separate codebases: Shivin's imitation/ learning repo, the MimicGen repo (mimicgen/), and Robomimic (robomimic/). Each of these plays a different role: imitation/ contains the policy architecture and training code, mimicgen/ contains the dataset generation tools and environment definitions, and robomimic/ contains lower-level robot learning utilities.
+
+We created a virtual environment and carefully pinned all dependencies to match what the imitation/ repo expects. The trickiest dependency was Robosuite: we had to use version 1.4.0 specifically, because Shivin's repo was written against the v1.4 API (specifically suite.make and suite.load_controller_config). The latest Robosuite version would silently break things. We also had to use Gymnasium 0.29.1, because v1.x introduced a strict isinstance check that breaks the RobosuiteImageFlipWrapper used during evaluation.
+
+Once the environment was set up, we built our evaluation pipeline on top of the RobosuiteEvaluator class in imitation/imitation/evaluators/robosuite_evaluator.py. That class handles resetting the environment, stepping through it with the policy, checking for task success via env.check_success(), and optionally recording frames. We wrote eval_square_d0.py as a wrapper that loads a checkpoint via BaseAlgo.load_weights(), configures the environment (84x84 agentview and wrist camera, OSC_POSE controller, NutAssemblySquare task), runs N rollouts up to 400 steps each, and saves per-rollout MP4 files labeled with their outcome. We also wrote minimal_eval.py as a simpler version with hardcoded config for quick iteration.
+
+Videos are saved with filenames like rollout_000_success.mp4 and rollout_001_fail.mp4 so we can quickly see what the policy is doing qualitatively. 
+
+[TODO: link to a sample success video and a sample failure video from rollout_videos/]
+
+We ran 20 rollouts to get our initial success rate estimate.
+
+2.3 Restarting Training with Better Instrumentation
+
+Once we confirmed rollouts were working, we restarted training with better metrics. In addition to training loss, we now want validation loss logged during training, and we want the rollout-based success metric computed periodically during training (for example, validation loss every 25 steps and rollout success rate every 50 steps). We are also saving weight checkpoints at regular intervals during training so that after training we can pick the checkpoints that had the best combination of loss and success rate rather than just taking the final weights.
+
+2.4 More Rollouts and Saving Failure Data [COMPLETE]
+
+We ran 30 rollouts using weights_ep550.pth with a max of 300 steps per rollout. This yielded 17 successes (56.7%) and 13 failures. In addition to saving per-rollout MP4 videos, we extended the evaluation pipeline to save each rollout as a .npz file containing the full observation and action sequences. We then wrote a separate combine_rollouts_to_hdf5.py script that reads those .npz files from a run directory and produces two HDF5 files in robomimic format: successes.hdf5 (positive examples) and failures.hdf5 (negative examples). These are ready to be used as training data.
+
+3.1 Contrastive Flow Matching Training [NEXT]
+
+Those saved HDF5 files become our positive and negative training data. The successful rollouts are positive examples (trajectories the policy should move toward) and the failed rollouts are negative examples (trajectories the policy should move away from). We will plug these into a contrastive flow matching training pipeline. The contrastive loss modifies the flow matching objective so that the learned vector field pushes probability mass toward positive trajectories and away from negative ones.
+
+Before running this on the full robot task, we plan to validate the contrastive loss on a 2D toy task to confirm that the gradient signal correctly separates positive and negative trajectories in a setting where we can visualize the result directly.
+
+The main failure modes we are watching for are mode collapse (the policy becomes overly conservative to avoid any action that resembles a failure) and manifold misalignment (our failure data is too sparse or not diverse enough to give a useful signal). If multi-step flow matching inference turns out to be too slow for real-time simulation, our backup plan is to move to a one-step Drifting Model framework, which preserves the expressivity of flow matching while reducing inference to a single forward pass.
+
+
