@@ -10,29 +10,16 @@ conda create -n flow-learning python=3.10 -y
 conda activate flow-learning
 ```
 
-## Git LFS (Large File Storage)
+## Git LFS
 
-This repository uses **Git LFS** to store model weights (`.pth` files). Standard Git is not designed for large binary files; LFS replaces these files with tiny text pointers in GitHub and downloads the actual data only when needed.
+This repo uses **Git LFS** for large binaries: `*.pth`, `*.mp4`, `*.npz`, `*.hdf5`.
 
-### Setup for New Users
-
-Before you can see the actual weight files, you must install and initialize Git LFS on your machine:
-
-**On Linux (Ubuntu):**
+**Setup (new users):**
 ```bash
-sudo apt install git-lfs
+# Linux: sudo apt install git-lfs
+# macOS: brew install git-lfs
 git lfs install
-```
-
-**On macOS:**
-```bash
-brew install git-lfs
-git lfs install
-```
-
-**After installation**, download the actual weights into your local directory:
-```bash
-git lfs pull
+git lfs pull   # download actual files after clone
 ```
 
 
@@ -75,6 +62,15 @@ mkdir -p imitation/imitation/data
 mv square_d0.hdf5 imitation/imitation/data/
 ```
 
+## Key Paths
+
+| Path | Purpose |
+|------|---------|
+| `rollout_videos/` | All rollout outputs (minimal_eval, training evals, combine outputs) |
+| `rollout_videos/run_*` | Minimal eval runs (mp4 + npz) |
+| `rollout_videos/training_epochs/` | Epoch-by-epoch videos from training |
+| `experiments/baseline_square/weights/` | Saved model checkpoints |
+
 ## Running Evaluation
 
 ### Standard Evaluation
@@ -87,10 +83,18 @@ python eval_square_d0.py \
     --video_dir rollout_videos
 ```
 
-### Minimal Evaluation (Hardcoded Config)
+### Minimal Evaluation (rollouts + NPZ for pos/neg dataset)
 ```bash
-python minimal_eval.py
+python minimal_eval.py --checkpoint experiments/baseline_square/weights/weights_ep550.pth \
+    --n_rollouts 30 --max_steps 300 --output_dir rollout_videos
 ```
+Writes videos and per-rollout `.npz` files to `rollout_videos/run_<timestamp>_<id>/`.
+
+### Combine rollouts → HDF5 (successes / failures)
+```bash
+python combine_rollouts_to_hdf5.py --run_dir rollout_videos/run_YYYYMMDD_HHMMSS_XXXXXXXX
+```
+Produces `successes.hdf5` and `failures.hdf5` in that run dir (robomimic format).
 
 ## Running Training
 
