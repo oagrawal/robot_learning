@@ -48,7 +48,7 @@ class WandBLogger:
         self.log_path = path
         print("INIT WANDB")
         wandb.init(
-            resume=exp_name,
+            resume='allow',
             project=project_name,
             config=filtered_config,
             dir=path,
