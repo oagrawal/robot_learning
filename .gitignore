@@ -54,7 +54,6 @@ Thumbs.db
 *.pkl
 *.pickle
 *.pt
-*.pth
 *.ckpt
 *.onnx
 
