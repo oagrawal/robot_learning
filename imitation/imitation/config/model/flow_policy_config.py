@@ -1,3 +1,5 @@
+import os
+
 from imitation.utils.general_utils import AttrDict
 from imitation.algo.flow_policy import FlowPolicy
 from imitation.models.image_nets import ResNet18, SpatialSoftmax
@@ -158,13 +160,15 @@ env_config = AttrDict(
     camera_widths=84,
 )
 
+# Project root rollout_videos (independent of cwd when running train.py)
+_PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
 evaluator_config = AttrDict(
     evaluator=RobosuiteEvaluator,
     env_config=env_config,
     n_rollouts=10,
     max_steps=400,
     save_video=True,
-    video_folder="rollout_videos"
+    video_folder=os.path.join(_PROJECT_ROOT, "rollout_videos"),
 )
 
 config = AttrDict(
