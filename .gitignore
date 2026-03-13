@@ -72,3 +72,9 @@ checkpoints/
 outputs/
 multirun/
 .hydra/
+
+############################
+# Rollout outputs (allow for pos/neg dataset - tracked via LFS)
+############################
+!rollout_videos/**/*.hdf5
+!rollout_videos/**/*.npz
