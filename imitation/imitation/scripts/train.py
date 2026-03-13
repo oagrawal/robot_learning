@@ -163,7 +163,8 @@ class Trainer:
         self.log_path = None
 
         if LOG:
-            self.log_path = os.path.join(self.train_config.output_dir, self.exp_name)
+            output_dir = os.path.expanduser(self.train_config.output_dir)
+            self.log_path = os.path.join(output_dir, self.exp_name)
             # TODO: create weights directory and fix the model save path
             os.makedirs(self.log_path, exist_ok=True)
 
