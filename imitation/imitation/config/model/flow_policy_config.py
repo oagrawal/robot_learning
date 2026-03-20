@@ -7,6 +7,7 @@ import torch.nn as nn
 import diffusers
 from collections import OrderedDict
 import robosuite as suite
+import mimicgen
 
 window_size = 2
 action_horizon = 8
@@ -35,7 +36,8 @@ data_config = AttrDict(
         # "/mnt/hdd2/libero/libero_10/LIVING_ROOM_SCENE5_put_the_white_mug_on_the_left_plate_and_put_the_yellow_and_white_mug_on_the_right_plate_demo.hdf5",
         # "/mnt/hdd2/libero/libero_10/LIVING_ROOM_SCENE6_put_the_white_mug_on_the_plate_and_put_the_chocolate_pudding_to_the_right_of_the_plate_demo.hdf5",
         # "/mnt/hdd2/libero/libero_10/STUDY_SCENE1_pick_up_the_book_and_place_it_in_the_back_compartment_of_the_caddy_demo.hdf5",
-        "./data/square_d0.hdf5"
+        # "./data/square_d0.hdf5",
+        "./data/stack_d0.hdf5"
     ],
     dataset_class=SequenceDataset,
     dataset_kwargs=dict(
@@ -145,13 +147,28 @@ observation_config = AttrDict(
 
 from imitation.evaluators.robosuite_evaluator import RobosuiteEvaluator
 
+# Square_D0
+# env_config = AttrDict(
+#     env_name="Square_D0",
+#     robots="Panda",
+#     controller_configs=suite.load_controller_config(default_controller="OSC_POSE"),
+#     has_renderer=False,
+#     has_offscreen_renderer=True,
+#     reward_shaping=True,
+#     use_camera_obs=True,
+#     camera_names=["agentview", "robot0_eye_in_hand"],
+#     camera_heights=84,
+#     camera_widths=84,
+# )
+
+# Stack_D0
 env_config = AttrDict(
-    env_name="NutAssemblySquare",
+    env_name="Stack_D0",
     robots="Panda",
     controller_configs=suite.load_controller_config(default_controller="OSC_POSE"),
     has_renderer=False,
     has_offscreen_renderer=True,
-    reward_shaping=True,
+    reward_shaping=False,
     use_camera_obs=True,
     camera_names=["agentview", "robot0_eye_in_hand"],
     camera_heights=84,
@@ -161,7 +178,7 @@ env_config = AttrDict(
 evaluator_config = AttrDict(
     evaluator=RobosuiteEvaluator,
     env_config=env_config,
-    n_rollouts=10,
+    n_rollouts=30,
     max_steps=400,
     save_video=True,
     video_folder="rollout_videos"
