@@ -78,3 +78,7 @@ multirun/
 ############################
 !rollout_videos/**/*.hdf5
 !rollout_videos/**/*.npz
+*.mp4
+*.pth
+!rollout_videos/**/*.mp4
+!rollout_videos/**/*.pth
