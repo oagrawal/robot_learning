@@ -72,3 +72,5 @@ checkpoints/
 outputs/
 multirun/
 .hydra/
+*.mp4
+*.pth
