@@ -82,3 +82,4 @@ multirun/
 *.pth
 !rollout_videos/**/*.mp4
 !rollout_videos/**/*.pth
+!imitation/imitation/rollout_videos/**/*.mp4
