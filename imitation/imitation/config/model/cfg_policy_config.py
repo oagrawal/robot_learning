@@ -1,11 +1,15 @@
+import os
+
 from imitation.utils.general_utils import AttrDict
 from imitation.algo.cfg_policy import CFGPolicy
 from imitation.models.image_nets import ResNet18, SpatialSoftmax
 from imitation.models.obs_nets import VisionCore, LowDimCore
 from imitation.data.cfg_dataset import CFGSequenceDataset
 import torch.nn as nn
-import robosuite as suite
+import diffusers
 from collections import OrderedDict
+import robosuite as suite
+import mimicgen
 
 window_size = 2
 action_horizon = 8
@@ -24,8 +28,8 @@ train_config = AttrDict(
 
 data_config = AttrDict(
     data=[
-        "./data/positive.hdf5",
-        "./data/negative.hdf5"
+        "./data/success.hdf5",
+        "./data/failure.hdf5"
     ],
     dataset_class=CFGSequenceDataset,
     dataset_kwargs=dict(
@@ -59,7 +63,7 @@ policy_config = AttrDict(
 
     # CFG Parameters
     w_succ=2.0,
-    w_fail=1.0,
+    w_fail=0.5,
     uncond_drop_prob=0.1
 )
 
@@ -115,8 +119,9 @@ observation_config = AttrDict(
 
 from imitation.evaluators.robosuite_evaluator import RobosuiteEvaluator
 
+# Square_D0
 env_config = AttrDict(
-    env_name="Stack_D0",
+    env_name="Square_D0",
     robots="Panda",
     controller_configs=suite.load_controller_config(default_controller="OSC_POSE"),
     has_renderer=False,
@@ -128,13 +133,28 @@ env_config = AttrDict(
     camera_widths=84,
 )
 
+
+# Stack_D0
+# env_config = AttrDict(
+#     env_name="Stack_D0",
+#     robots="Panda",
+#     controller_configs=suite.load_controller_config(default_controller="OSC_POSE"),
+#     has_renderer=False,
+#     has_offscreen_renderer=True,
+#     reward_shaping=False,
+#     use_camera_obs=True,
+#     camera_names=["agentview", "robot0_eye_in_hand"],
+#     camera_heights=84,
+#     camera_widths=84,
+# )
+
 evaluator_config = AttrDict(
     evaluator=RobosuiteEvaluator,
     env_config=env_config,
     n_rollouts=30,
     max_steps=400,
     save_video=True,
-    video_folder="rollout_videos"
+    video_folder="../../rollout_videos_square_d0"
 )
 
 config = AttrDict(
