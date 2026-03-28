@@ -33,9 +33,9 @@ class Trainer:
         self.best_val_loss = float('inf')
         self.best_success_rate = 0.0
 
-    def train(self, n_epochs):
+    def train(self, n_epochs, start_epoch=0):
         self.model.train()
-        for epoch in range(n_epochs):
+        for epoch in range(start_epoch, n_epochs):
             epoch_info = self.train_epoch(epoch)
             self.model.post_epoch_update()
             
@@ -174,12 +174,52 @@ class Trainer:
         if self.log_path is not None:
             print(f"==> Saving checkpoint at epoch {epoch}")
             self.model.save_weights(epoch, self.log_path)
+
+            # Save full training state for resume
+            training_state = {
+                'epoch': epoch,
+                'optimizer_states': [opt.state_dict() for opt in self.optimizers],
+                'scheduler_states': [sch.state_dict() for sch in self.lr_schedulers if sch is not None],
+                'best_val_loss': self.best_val_loss,
+                'best_success_rate': self.best_success_rate,
+            }
+            state_path = os.path.join(self.log_path, 'weights', f'training_state_ep{epoch}.pth')
+            torch.save(training_state, state_path)
             
     def save_custom_model(self, filename):
         if self.log_path is not None:
             print(f"==> Saving custom model: {filename}")
             filepath = os.path.join(self.log_path, filename)
             torch.save(self.model.state_dict(), filepath)
+
+    def resume_from_checkpoint(self, checkpoint_path):
+        """Resume training from a checkpoint. Expects path to weights_epN.pth file."""
+        print(f"==> Resuming from {checkpoint_path}")
+        
+        # Load model weights
+        kwargs, state = torch.load(checkpoint_path, weights_only=False, map_location='cuda')
+        self.model.load_state_dict(state)
+        
+        # Load training state (optimizer, scheduler, epoch)
+        checkpoint_dir = os.path.dirname(checkpoint_path)
+        checkpoint_name = os.path.basename(checkpoint_path)
+        epoch_num = int(checkpoint_name.replace('weights_ep', '').replace('.pth', ''))
+        state_path = os.path.join(checkpoint_dir, f'training_state_ep{epoch_num}.pth')
+        
+        if os.path.exists(state_path):
+            training_state = torch.load(state_path, weights_only=False, map_location='cuda')
+            for i, opt in enumerate(self.optimizers):
+                opt.load_state_dict(training_state['optimizer_states'][i])
+            for i, sch in enumerate(self.lr_schedulers):
+                if sch is not None and i < len(training_state['scheduler_states']):
+                    sch.load_state_dict(training_state['scheduler_states'][i])
+            self.best_val_loss = training_state.get('best_val_loss', float('inf'))
+            self.best_success_rate = training_state.get('best_success_rate', 0.0)
+            print(f"==> Restored optimizer/scheduler state from epoch {epoch_num}")
+        else:
+            print(f"WARNING: No training state file found at {state_path}, only model weights restored")
+        
+        return epoch_num
 
     def load_config(self, config_path):
         self.conf = SourceFileLoader('conf', config_path).load_module().config
@@ -252,7 +292,13 @@ if __name__=='__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=str, help="path to the config file")
     parser.add_argument("--exp_name", type=str, help="unique name of the current run(include details of the architecture. eg. SimpleC2R_64x3_relu_run1)")
+    parser.add_argument("--resume", type=str, default=None, help="path to checkpoint file (weights_epN.pth) to resume from")
     args = parser.parse_args()
 
     trainer = Trainer(config_path=args.config, exp_name=args.exp_name)
-    trainer.train(n_epochs=trainer.train_config.num_epochs)
+    
+    start_epoch = 0
+    if args.resume:
+        start_epoch = trainer.resume_from_checkpoint(args.resume) + 1
+    
+    trainer.train(n_epochs=trainer.train_config.num_epochs, start_epoch=start_epoch)
