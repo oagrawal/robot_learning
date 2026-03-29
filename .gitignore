@@ -57,7 +57,6 @@ Thumbs.db
 *.ckpt
 *.onnx
 
-data/
 datasets/
 
 ############################
