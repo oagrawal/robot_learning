@@ -186,7 +186,7 @@ evaluator_config = AttrDict(
     n_rollouts=30,
     max_steps=400,
     save_video=True,
-    video_folder=os.path.join(_PROJECT_ROOT, "rollout_videos"),
+    video_folder="../../rollout_videos_square_d0_FM",
 )
 
 config = AttrDict(

@@ -154,7 +154,7 @@ evaluator_config = AttrDict(
     n_rollouts=30,
     max_steps=400,
     save_video=True,
-    video_folder="../../rollout_videos_square_d0"
+    video_folder="../../rollout_videos_square_d0_CFG"
 )
 
 config = AttrDict(
