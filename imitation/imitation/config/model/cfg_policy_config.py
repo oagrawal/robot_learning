@@ -29,14 +29,15 @@ train_config = AttrDict(
 data_config = AttrDict(
     data=[
         "./data/success.hdf5",
-        "./data/failure.hdf5"
+        "./data/failure_labeled.hdf5"
     ],
     dataset_class=CFGSequenceDataset,
     dataset_kwargs=dict(
         dataset_keys=['actions'],
         window_size=window_size,
         action_horizon=action_horizon,
-        num_pos=1, # Important! Tells CFGSequenceDataset that the first path is positive data
+        num_pos=1,
+        use_timestep_labels=True,  # Use per-timestep c_labels from label_timesteps.py
     ),
     num_workers=20
 )
