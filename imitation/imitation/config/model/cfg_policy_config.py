@@ -35,7 +35,7 @@ data_config = AttrDict(
     dataset_kwargs=dict(
         dataset_keys=['actions'],
         window_size=window_size,
-        action_horizon=action_horizon,
+        action_horizon=action_horizon,  # also used by _get_timestep_label lookahead
         num_pos=1,
         use_timestep_labels=True,  # Use per-timestep c_labels from label_timesteps.py
     ),
