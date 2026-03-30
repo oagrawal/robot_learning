@@ -3,6 +3,7 @@ import argparse
 import itertools
 import pandas as pd
 from importlib.machinery import SourceFileLoader
+import torch
 
 from imitation.algo.base_algo import BaseAlgo
 
