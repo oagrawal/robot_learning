@@ -17,10 +17,24 @@ def main(args):
     eval_config.n_rollouts = 30  # As you requested
     
     # Load model
-    print(f"Loading model from {args.checkpoint}")
-    model = BaseAlgo.load_weights(args.checkpoint)
+    print(f"Loading base model structure from {args.checkpoint}")
+    try:
+        model = BaseAlgo.load_weights(args.checkpoint)
+    except ValueError:
+        raise ValueError(
+            "\n\nERROR: You provided 'best_val_model.pth' or 'best_eval_model.pth' which only contains raw weights (not the model architecture config)."
+            "\n\nTo evaluate this model, provide ANY standard epoch checkpoint as the base structure, and pass this file as the state_dict:"
+            "\nExample: python eval_grid_search.py --config ... --checkpoint weights/weights_ep500.pth --state_dict best_val_model.pth\n"
+        )
+    
     if not model:
         raise FileNotFoundError(f"Could not load weights from {args.checkpoint}")
+        
+    if args.state_dict:
+        print(f"Overriding weights with state_dict from: {args.state_dict}")
+        state = torch.load(args.state_dict, map_location='cpu')
+        model.load_state_dict(state)
+        
     model.to('cuda')
     model.eval()
     
@@ -83,7 +97,8 @@ def main(args):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=str, required=True, help="Path to the model config file (e.g. cfg_policy_config.py)")
-    parser.add_argument("--checkpoint", type=str, required=True, help="Path to the saved weights *.pth file")
+    parser.add_argument("--checkpoint", type=str, required=True, help="Path to a standard weights_epN.pth file to build the architecture")
+    parser.add_argument("--state_dict", type=str, default=None, help="Optional: Path to a raw state_dict (like best_val_model.pth) to override the weights.")
     parser.add_argument("--output", type=str, default="grid_search_results.csv", help="Where to save the CSV results")
     args = parser.parse_args()
     main(args)
