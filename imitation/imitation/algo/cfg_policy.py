@@ -48,9 +48,18 @@ class CFGPolicy(BaseAlgo):
         flat_action_dims = action_dim*policy_config.n_action_steps
         global_cond_dim = obs_feature_dim * policy_config.n_obs_steps
         
-        # +1 input dim to support the class token 'c' concatenated perfectly to the end computation
+        self.cond_embed_dim = getattr(policy_config, 'cond_embed_dim', 64)
+        
+        # Simple MLP to give the scalar `c` more bandwidth
+        self.nets["c_encoder"] = nn.Sequential(
+            nn.Linear(1, self.cond_embed_dim),
+            nn.Mish(),
+            nn.Linear(self.cond_embed_dim, self.cond_embed_dim)
+        )
+
+        # + cond_embed_dim to support the encoded class token
         model = MLPDiffusionHead(
-            input_dim=flat_action_dims + global_cond_dim + policy_config.diffusion_step_embed_dim + 1,
+            input_dim=flat_action_dims + global_cond_dim + policy_config.diffusion_step_embed_dim + self.cond_embed_dim,
             output_dim=flat_action_dims,
             diffusion_step_embed_dim=policy_config.diffusion_step_embed_dim
         )
@@ -115,7 +124,8 @@ class CFGPolicy(BaseAlgo):
             c = c * (1 - mask) + (-1.0) * mask
             
         # Push 'C' seamlessly onto the global_cond
-        global_cond = torch.cat([global_cond, c], dim=-1)
+        c_emb = self.nets["c_encoder"](c)
+        global_cond = torch.cat([global_cond, c_emb], dim=-1)
 
         noise = torch.randn_like(actions, device=actions.device)
         timesteps = self.flow_time_sampler.sample_fm_time(B).to(actions.device)
@@ -187,9 +197,13 @@ class CFGPolicy(BaseAlgo):
         c_succ = torch.ones((B, 1), device=obs_features.device) * 1.0
         c_fail = torch.ones((B, 1), device=obs_features.device) * 0.0
         
-        cond_uncond = torch.cat([global_cond, c_uncond], dim=-1)
-        cond_succ = torch.cat([global_cond, c_succ], dim=-1)
-        cond_fail = torch.cat([global_cond, c_fail], dim=-1)
+        c_uncond_emb = self.nets["c_encoder"](c_uncond)
+        c_succ_emb = self.nets["c_encoder"](c_succ)
+        c_fail_emb = self.nets["c_encoder"](c_fail)
+        
+        cond_uncond = torch.cat([global_cond, c_uncond_emb], dim=-1)
+        cond_succ = torch.cat([global_cond, c_succ_emb], dim=-1)
+        cond_fail = torch.cat([global_cond, c_fail_emb], dim=-1)
         
         # Stack so we can query the network in one batched forward pass for speed
         cond_all = torch.cat([cond_uncond, cond_succ, cond_fail], dim=0)
@@ -246,9 +260,13 @@ class CFGPolicy(BaseAlgo):
         c_succ = torch.ones((B, 1), device=obs_features.device) * 1.0
         c_fail = torch.ones((B, 1), device=obs_features.device) * 0.0
         
-        cond_uncond = torch.cat([global_cond, c_uncond], dim=-1)
-        cond_succ = torch.cat([global_cond, c_succ], dim=-1)
-        cond_fail = torch.cat([global_cond, c_fail], dim=-1)
+        c_uncond_emb = self.nets["c_encoder"](c_uncond)
+        c_succ_emb = self.nets["c_encoder"](c_succ)
+        c_fail_emb = self.nets["c_encoder"](c_fail)
+        
+        cond_uncond = torch.cat([global_cond, c_uncond_emb], dim=-1)
+        cond_succ = torch.cat([global_cond, c_succ_emb], dim=-1)
+        cond_fail = torch.cat([global_cond, c_fail_emb], dim=-1)
         
         cond_all = torch.cat([cond_uncond, cond_succ, cond_fail], dim=0)
 
