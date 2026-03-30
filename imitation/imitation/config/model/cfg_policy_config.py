@@ -63,7 +63,7 @@ policy_config = AttrDict(
     action_normalization_type='gaussian',
 
     # CFG Parameters
-    w_succ=2.0,
+    w_succ=1.5,
     w_fail=0.5,
     uncond_drop_prob=0.1
 )
@@ -155,7 +155,7 @@ evaluator_config = AttrDict(
     n_rollouts=30,
     max_steps=400,
     save_video=True,
-    video_folder="../../rollout_videos_square_d0_CFG_finegrained"
+    video_folder="../../rollout_videos_square_d0_CFG_finegrained_improved"
 )
 
 config = AttrDict(
