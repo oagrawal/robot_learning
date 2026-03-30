@@ -33,6 +33,9 @@ class CFGSequenceDataset(torch.utils.data.Dataset):
             if 'c_labels' not in existing_keys:
                 existing_keys.append('c_labels')
             neg_kwargs['dataset_keys'] = existing_keys
+            
+        kwargs['action_horizon'] = action_horizon
+        neg_kwargs['action_horizon'] = action_horizon
         
         self.pos_dataset = SequenceDataset(data_paths=positive_data_paths, **kwargs)
         self.neg_dataset = SequenceDataset(data_paths=negative_data_paths, **neg_kwargs)
