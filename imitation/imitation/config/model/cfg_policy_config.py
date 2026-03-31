@@ -65,7 +65,8 @@ policy_config = AttrDict(
     # CFG Parameters
     w_succ=1.5,
     w_fail=0.5,
-    uncond_drop_prob=0.1
+    uncond_drop_prob=0.1,
+    rescale_phi=0.7
 )
 
 observation_config = AttrDict(

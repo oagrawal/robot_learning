@@ -79,6 +79,9 @@ class CFGPolicy(BaseAlgo):
         self.w_succ = getattr(policy_config, 'w_succ', 2.0)
         self.w_fail = getattr(policy_config, 'w_fail', 1.0)
         
+        # Rescale phi (0.0 means no rescale, 1.0 means full rescale)
+        self.rescale_phi = getattr(policy_config, 'rescale_phi', 0.7)
+        
         self.reset()
 
     def get_optimizers_and_schedulers(self, **kwargs):
@@ -223,6 +226,12 @@ class CFGPolicy(BaseAlgo):
             # Formulate the explicit gradient repel
             v_guided = v_uncond + self.w_succ * (v_succ - v_uncond) - self.w_fail * (v_fail - v_uncond)
 
+            if self.rescale_phi > 0.0:
+                norm_guided = torch.linalg.norm(v_guided, dim=-1, keepdim=True)
+                norm_succ = torch.linalg.norm(v_succ, dim=-1, keepdim=True)
+                v_guided_rescaled = v_guided * (norm_succ / (norm_guided + 1e-6))
+                v_guided = self.rescale_phi * v_guided_rescaled + (1.0 - self.rescale_phi) * v_guided
+
             pred_action += delta_t * v_guided
             timestep += delta_t
         
@@ -282,6 +291,12 @@ class CFGPolicy(BaseAlgo):
             v_uncond, v_succ, v_fail = torch.chunk(model_output, 3, dim=0)
             
             v_guided = v_uncond + self.w_succ * (v_succ - v_uncond) - self.w_fail * (v_fail - v_uncond)
+
+            if self.rescale_phi > 0.0:
+                norm_guided = torch.linalg.norm(v_guided, dim=-1, keepdim=True)
+                norm_succ = torch.linalg.norm(v_succ, dim=-1, keepdim=True)
+                v_guided_rescaled = v_guided * (norm_succ / (norm_guided + 1e-6))
+                v_guided = self.rescale_phi * v_guided_rescaled + (1.0 - self.rescale_phi) * v_guided
 
             pred_action += delta_t * v_guided
             timestep += delta_t

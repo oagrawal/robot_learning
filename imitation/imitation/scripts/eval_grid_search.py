@@ -43,22 +43,31 @@ def main(args):
     evaluator = eval_config.evaluator(eval_config=eval_config)
     
     # Define grid.
-    # We can sweep over a sensible range for both weights.
-    w_succ_values = [1.0, 1.5, 2.0, 2.5]
-    w_fail_values = [0.0, 0.5, 1.0, 1.5]
+    # Choose reasonable ranges that avoid Unconditional Cancellation and test Rescale functionality.
+    w_succ_values = [1.0, 1.2, 1.5]
+    w_fail_values = [0.0, 0.1, 0.5]
+    rescale_phi_values = [0.5, 0.7, 1.0]
     
     results = []
     
-    print(f"\nStarting Grid Search. Total configurations to evaluate: {len(w_succ_values) * len(w_fail_values)}")
+    total_configs = len(w_succ_values) * len(w_fail_values) * len(rescale_phi_values)
+    print(f"\nStarting Grid Search. Total configurations to evaluate: {total_configs}")
     
-    for w_s, w_f in itertools.product(w_succ_values, w_fail_values):
-        print(f"\n{'-'*40}")
-        print(f"Evaluating --- w_succ = {w_s:.1f} | w_fail = {w_f:.1f}")
-        print(f"{'-'*40}")
+    for w_s, w_f, phi in itertools.product(w_succ_values, w_fail_values, rescale_phi_values):
+        # Skip configurations that cause mathematical cancellation (w_succ - w_fail == 1.0)
+        # except for the pure conditional baseline (1.0 - 0.0)
+        if abs((w_s - w_f) - 1.0) < 1e-5 and w_s != 1.0:
+            print(f"\nSkipping functionally broken config: w_succ={w_s:.1f}, w_fail={w_f:.1f} (Uncond Cancellation)")
+            continue
+
+        print(f"\n{'-'*55}")
+        print(f"Evaluating --- w_succ = {w_s:.1f} | w_fail = {w_f:.1f} | rescale_phi = {phi:.1f}")
+        print(f"{'-'*55}")
         
         # Override the policy's weights dynamically
         model.w_succ = w_s
         model.w_fail = w_f
+        model.rescale_phi = phi
         
         # Run evaluation (rollouts)
         with torch.no_grad():
@@ -73,6 +82,7 @@ def main(args):
         results.append({
             'w_succ': w_s,
             'w_fail': w_f,
+            'rescale_phi': phi,
             'success_rate': succ_rate,
             'num_success': num_success,
             'num_fail': num_fail,
