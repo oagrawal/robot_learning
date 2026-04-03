@@ -19,7 +19,7 @@ class RobosuiteEvaluator:
         self.video_folder = eval_config.get("video_folder", "rollout_videos")
         self.save_npz = eval_config.get("save_npz", False)
 
-    def evaluate(self, policy, epoch=None, seed=None):
+    def evaluate(self, policy, epoch=None, seed=None, verification_video_dir=None):
         print("\nEvaluating policy...")
         if self.save_video or self.save_npz:
             if epoch is not None:
@@ -30,6 +30,8 @@ class RobosuiteEvaluator:
 
         # Seed the RNG so the simulator starts in the same state for each
         # rollout index across different evaluate() calls with the same seed.
+        # This works because robosuite's env.step() does not consume np.random
+        # — only env.reset() does (for object placement sampling).
         if seed is not None:
             np.random.seed(seed)
             random.seed(seed)
@@ -38,14 +40,30 @@ class RobosuiteEvaluator:
         timsteps = np.full((self.n_rollouts,), self.max_steps)
         init_states = []  # collect initial low-dim state for seed verification
         for n in tqdm(range(self.n_rollouts)):
+
             obs = self.env.reset()
             policy.reset()
 
             # Record initial state fingerprint for seed verification
             if seed is not None:
-                eef = obs.get('robot0_eef_pos', None)
-                if eef is not None:
-                    init_states.append(np.array(eef, dtype=np.float64))
+                state_vec = []
+                for key in sorted(obs.keys()):
+                    if 'image' not in key:  # skip images
+                        state_vec.append(np.array(obs[key], dtype=np.float64).ravel())
+                if state_vec:
+                    init_states.append(np.concatenate(state_vec))
+
+            # Save first frame as a verification image so the user can visually
+            # confirm that the nut/peg start in the same location across checkpoints.
+            if verification_video_dir is not None and n < 3:
+                os.makedirs(verification_video_dir, exist_ok=True)
+                tag = f"ep{epoch}" if epoch is not None else "noepoch"
+                img_path = os.path.join(
+                    verification_video_dir,
+                    f"{tag}_rollout_{n:03d}_init.png"
+                )
+                imageio.imwrite(img_path, obs["agentview_image"].astype(np.uint8))
+                print(f"  Saved verification frame: {img_path}")
 
             frames = []
             obs_history = {k: [] for k in obs.keys()}
@@ -96,13 +114,15 @@ class RobosuiteEvaluator:
         if seed is not None and init_states:
             print(f"\n--- Seed verification (seed={seed}) ---")
             for i, st in enumerate(init_states[:5]):
-                print(f"  Rollout {i:3d} initial eef_pos: {st}")
+                # Print a compact hash per rollout for easy visual comparison
+                rollout_hash = hashlib.md5(st.tobytes()).hexdigest()[:12]
+                print(f"  Rollout {i:3d}: state_hash={rollout_hash}")
             if len(init_states) > 5:
                 print(f"  ... ({len(init_states) - 5} more rollouts omitted)")
             # Compute a single hash over all initial states for easy comparison
-            state_bytes = np.array(init_states).tobytes()
+            state_bytes = np.concatenate(init_states).tobytes()
             digest = hashlib.md5(state_bytes).hexdigest()
-            print(f"  Init-state MD5 digest: {digest}")
+            print(f"  Combined init-state MD5 digest: {digest}")
             print(f"--- End seed verification ---\n")
             eval_info['init_state_hash'] = digest
 
