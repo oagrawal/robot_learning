@@ -19,7 +19,7 @@ class RobosuiteEvaluator:
         self.video_folder = eval_config.get("video_folder", "rollout_videos")
         self.save_npz = eval_config.get("save_npz", False)
 
-    def evaluate(self, policy, epoch=None, seed=None, verification_video_dir=None):
+    def evaluate(self, policy, epoch=None, seed=None, verification_frames_dir=None):
         print("\nEvaluating policy...")
         if self.save_video or self.save_npz:
             if epoch is not None:
@@ -46,20 +46,19 @@ class RobosuiteEvaluator:
 
             # Record initial state fingerprint for seed verification
             if seed is not None:
-                state_vec = []
+                init_obs = {}
                 for key in sorted(obs.keys()):
-                    if 'image' not in key:  # skip images
-                        state_vec.append(np.array(obs[key], dtype=np.float64).ravel())
-                if state_vec:
-                    init_states.append(np.concatenate(state_vec))
+                    if 'image' not in key:
+                        init_obs[key] = np.array(obs[key], dtype=np.float64)
+                init_states.append(init_obs)
 
             # Save first frame as a verification image so the user can visually
             # confirm that the nut/peg start in the same location across checkpoints.
-            if verification_video_dir is not None and n < 3:
-                os.makedirs(verification_video_dir, exist_ok=True)
+            if verification_frames_dir is not None and n < 3:
+                os.makedirs(verification_frames_dir, exist_ok=True)
                 tag = f"ep{epoch}" if epoch is not None else "noepoch"
                 img_path = os.path.join(
-                    verification_video_dir,
+                    verification_frames_dir,
                     f"{tag}_rollout_{n:03d}_init.png"
                 )
                 imageio.imwrite(img_path, obs["agentview_image"].astype(np.uint8))
@@ -113,14 +112,16 @@ class RobosuiteEvaluator:
         # Print initial-state fingerprints so user can verify seeding works
         if seed is not None and init_states:
             print(f"\n--- Seed verification (seed={seed}) ---")
-            for i, st in enumerate(init_states[:5]):
-                # Print a compact hash per rollout for easy visual comparison
-                rollout_hash = hashlib.md5(st.tobytes()).hexdigest()[:12]
-                print(f"  Rollout {i:3d}: state_hash={rollout_hash}")
-            if len(init_states) > 5:
-                print(f"  ... ({len(init_states) - 5} more rollouts omitted)")
+            # Print all low-dim obs keys for the first few rollouts
+            for i in range(min(3, len(init_states))):
+                print(f"  Rollout {i}:")
+                for key, val in init_states[i].items():
+                    print(f"    {key}: {val}")
+            if len(init_states) > 3:
+                print(f"  ... ({len(init_states) - 3} more rollouts omitted)")
             # Compute a single hash over all initial states for easy comparison
-            state_bytes = np.concatenate(init_states).tobytes()
+            all_vecs = [np.concatenate([v.ravel() for v in s.values()]) for s in init_states]
+            state_bytes = np.concatenate(all_vecs).tobytes()
             digest = hashlib.md5(state_bytes).hexdigest()
             print(f"  Combined init-state MD5 digest: {digest}")
             print(f"--- End seed verification ---\n")
