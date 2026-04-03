@@ -1,4 +1,6 @@
 import os
+import random
+import hashlib
 import numpy as np
 import imageio
 from tqdm import tqdm
@@ -17,7 +19,7 @@ class RobosuiteEvaluator:
         self.video_folder = eval_config.get("video_folder", "rollout_videos")
         self.save_npz = eval_config.get("save_npz", False)
 
-    def evaluate(self, policy, epoch=None):
+    def evaluate(self, policy, epoch=None, seed=None):
         print("\nEvaluating policy...")
         if self.save_video or self.save_npz:
             if epoch is not None:
@@ -26,11 +28,24 @@ class RobosuiteEvaluator:
                 current_folder = self.video_folder
             os.makedirs(current_folder, exist_ok=True)
 
+        # Seed the RNG so the simulator starts in the same state for each
+        # rollout index across different evaluate() calls with the same seed.
+        if seed is not None:
+            np.random.seed(seed)
+            random.seed(seed)
+
         success = np.zeros(self.n_rollouts)
         timsteps = np.full((self.n_rollouts,), self.max_steps)
+        init_states = []  # collect initial low-dim state for seed verification
         for n in tqdm(range(self.n_rollouts)):
             obs = self.env.reset()
             policy.reset()
+
+            # Record initial state fingerprint for seed verification
+            if seed is not None:
+                eef = obs.get('robot0_eef_pos', None)
+                if eef is not None:
+                    init_states.append(np.array(eef, dtype=np.float64))
 
             frames = []
             obs_history = {k: [] for k in obs.keys()}
@@ -76,6 +91,20 @@ class RobosuiteEvaluator:
             'success_rate': np.mean(success),
             'mean_timesteps': np.mean(timsteps),
         }
+
+        # Print initial-state fingerprints so user can verify seeding works
+        if seed is not None and init_states:
+            print(f"\n--- Seed verification (seed={seed}) ---")
+            for i, st in enumerate(init_states[:5]):
+                print(f"  Rollout {i:3d} initial eef_pos: {st}")
+            if len(init_states) > 5:
+                print(f"  ... ({len(init_states) - 5} more rollouts omitted)")
+            # Compute a single hash over all initial states for easy comparison
+            state_bytes = np.array(init_states).tobytes()
+            digest = hashlib.md5(state_bytes).hexdigest()
+            print(f"  Init-state MD5 digest: {digest}")
+            print(f"--- End seed verification ---\n")
+            eval_info['init_state_hash'] = digest
 
         print(f"Success rate: {eval_info['success_rate']}")
         print(f"Mean timesteps: {eval_info['mean_timesteps']}\n")
