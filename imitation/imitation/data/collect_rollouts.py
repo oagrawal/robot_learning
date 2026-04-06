@@ -50,10 +50,14 @@ def collect_rollouts(checkpoint_path, output_dir, n_successes, n_failures, max_s
     failure_path = os.path.join(output_dir, 'failure_dense.hdf5')
     video_dir = os.path.join(output_dir, 'collection_videos')
 
-    f_succ = h5py.File(success_path, 'w')
-    f_fail = h5py.File(failure_path, 'w')
-    succ_grp = f_succ.create_group('data')
-    fail_grp = f_fail.create_group('data')
+    f_succ, succ_grp = None, None
+    f_fail, fail_grp = None, None
+    if n_successes > 0:
+        f_succ = h5py.File(success_path, 'w')
+        succ_grp = f_succ.create_group('data')
+    if n_failures > 0:
+        f_fail = h5py.File(failure_path, 'w')
+        fail_grp = f_fail.create_group('data')
 
     success_count = 0
     failure_count = 0
@@ -104,7 +108,7 @@ def collect_rollouts(checkpoint_path, output_dir, n_successes, n_failures, max_s
 
         total_rollouts += 1
 
-        if success and success_count < n_successes:
+        if success and success_count < n_successes and succ_grp is not None:
             demo_key = f"demo_{success_count}"
             demo_grp = succ_grp.create_group(demo_key)
             demo_grp.create_dataset('actions', data=np.array(action_history, dtype=np.float32))
@@ -128,7 +132,7 @@ def collect_rollouts(checkpoint_path, output_dir, n_successes, n_failures, max_s
                     writer.append_data(frame.astype(np.uint8))
                 writer.close()
 
-        elif not success and failure_count < n_failures:
+        elif not success and failure_count < n_failures and fail_grp is not None:
             demo_key = f"demo_{failure_count}"
             demo_grp = fail_grp.create_group(demo_key)
             demo_grp.create_dataset('actions', data=np.array(action_history, dtype=np.float32))
@@ -157,12 +161,16 @@ def collect_rollouts(checkpoint_path, output_dir, n_successes, n_failures, max_s
         pbar.set_description(f"Collecting (S:{success_count}/{n_successes} F:{failure_count}/{n_failures})")
 
     pbar.close()
-    f_succ.close()
-    f_fail.close()
+    if f_succ is not None:
+        f_succ.close()
+    if f_fail is not None:
+        f_fail.close()
 
     print(f"\nDone! {total_rollouts} total rollouts")
-    print(f"  Successes: {success_count} → {success_path}")
-    print(f"  Failures:  {failure_count} → {failure_path}")
+    if n_successes > 0:
+        print(f"  Successes: {success_count} → {success_path}")
+    if n_failures > 0:
+        print(f"  Failures:  {failure_count} → {failure_path}")
     print(f"  Videos:    {video_dir}/")
     print(f"  Policy success rate: {success_count/total_rollouts:.1%}")
 
