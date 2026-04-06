@@ -28,16 +28,16 @@ train_config = AttrDict(
 
 data_config = AttrDict(
     data=[
-        "./data/success.hdf5",
-        "./data/failure_labeled.hdf5"
+        "./data/success.hdf5",          # positive demos (c=1)
+        "./data/failure_labeled.hdf5"   # negative demos (c from label_timesteps.py)
     ],
     dataset_class=CFGSequenceDataset,
     dataset_kwargs=dict(
         dataset_keys=['actions'],
         window_size=window_size,
-        action_horizon=action_horizon,  # also used by _get_timestep_label lookahead
-        num_pos=1,
-        use_timestep_labels=True,  # Use per-timestep c_labels from label_timesteps.py
+        action_horizon=action_horizon,
+        num_pos=1,                      # first 1 path is positive, rest are negative
+        use_timestep_labels=True,       # use per-timestep c_labels from HDF5
     ),
     num_workers=20
 )
@@ -62,11 +62,14 @@ policy_config = AttrDict(
     num_inference_steps=50,
     action_normalization_type='gaussian',
 
-    # CFG Parameters
-    w_succ=1.5,
-    w_fail=0.5,
-    uncond_drop_prob=0.1,
-    rescale_phi=0.7
+    # --- CFG parameters ---
+    # Training-time
+    uncond_drop_prob=0.1,       # probability of dropping class label during training
+
+    # Inference-time (used during eval, not during training)
+    w_succ=1.0,                 # success guidance weight (1.0 = pure conditional, no amplification)
+    w_fail=0.0,                 # failure repulsion weight (0.0 = disabled)
+    rescale_phi=0.0             # velocity rescaling (0.0 = disabled)
 )
 
 observation_config = AttrDict(
@@ -156,7 +159,7 @@ evaluator_config = AttrDict(
     n_rollouts=30,
     max_steps=400,
     save_video=True,
-    video_folder="../../rollout_videos_square_d0_CFG_finegrained_improved"
+    video_folder="../../rollout_videos_square_d0_CFG"
 )
 
 config = AttrDict(
