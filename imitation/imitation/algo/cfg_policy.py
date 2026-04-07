@@ -19,6 +19,7 @@ from collections import deque
 
 from imitation.utils.flow_utils import FlowTimeSampler
 from imitation.models.diffusion_mlp_nets import MLPDiffusionHead
+from imitation.models.conditional_unet import ConditionalUnet1D
 
 class CFGPolicy(BaseAlgo):
     """
@@ -65,7 +66,6 @@ class CFGPolicy(BaseAlgo):
 
         obs_feature_dim = obs_encoder.output_shape()
 
-        flat_action_dims = action_dim * policy_config.n_action_steps
         global_cond_dim = obs_feature_dim * policy_config.n_obs_steps
         
         # Class conditioning encoder: maps 8D label vector → 64D embedding
@@ -77,12 +77,27 @@ class CFGPolicy(BaseAlgo):
         )
 
         # Flow matching velocity network (conditioned on obs + class embedding)
-        model = MLPDiffusionHead(
-            input_dim=flat_action_dims + global_cond_dim + policy_config.diffusion_step_embed_dim + self.cond_embed_dim,
-            output_dim=flat_action_dims,
-            diffusion_step_embed_dim=policy_config.diffusion_step_embed_dim
+        # c_encoder output is concatenated to global_cond, so the U-Net's FiLM layers
+        # modulate intermediate features based on both obs and class signal.
+        model = ConditionalUnet1D(
+            input_dim=action_dim,
+            global_cond_dim=global_cond_dim + self.cond_embed_dim,
+            diffusion_step_embed_dim=policy_config.diffusion_step_embed_dim,
+            down_dims=policy_config.down_dims,
+            kernel_size=policy_config.kernel_size,
+            n_groups=policy_config.n_groups,
+            cond_predict_scale=policy_config.cond_predict_scale,
+            pos_embedding_period=policy_config.pos_embedding_period,
         )
         self.nets["model"] = model
+
+        # --- MLP variant (commented out, replaced by ConditionalUnet1D above) ---
+        # flat_action_dims = action_dim * policy_config.n_action_steps
+        # model = MLPDiffusionHead(
+        #     input_dim=flat_action_dims + global_cond_dim + policy_config.diffusion_step_embed_dim + self.cond_embed_dim,
+        #     output_dim=flat_action_dims,
+        #     diffusion_step_embed_dim=policy_config.diffusion_step_embed_dim
+        # )
 
         # Flow time sampler
         self.flow_time_sampler = FlowTimeSampler(**policy_config.flow_time_sampler_kwargs)

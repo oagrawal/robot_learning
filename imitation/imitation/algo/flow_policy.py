@@ -47,26 +47,26 @@ class FlowPolicy(BaseAlgo):
 
         obs_feature_dim = obs_encoder.output_shape()
 
-        # input_dim = action_dim
-        # global_cond_dim = obs_feature_dim * policy_config.n_obs_steps
-        # model = ConditionalUnet1D(
-        #     input_dim=input_dim,
-        #     global_cond_dim=global_cond_dim,
-        #     diffusion_step_embed_dim=policy_config.diffusion_step_embed_dim,
-        #     down_dims=policy_config.down_dims,
-        #     kernel_size=policy_config.kernel_size,
-        #     n_groups=policy_config.n_groups,
-        #     cond_predict_scale=policy_config.cond_predict_scale,
-        #     pos_embedding_period=policy_config.pos_embedding_period,
-        # )
-
-        flat_action_dims = action_dim*policy_config.n_action_steps
         global_cond_dim = obs_feature_dim * policy_config.n_obs_steps
-        model = MLPDiffusionHead(
-            input_dim=flat_action_dims + global_cond_dim + policy_config.diffusion_step_embed_dim,
-            output_dim=flat_action_dims,
-            diffusion_step_embed_dim=policy_config.diffusion_step_embed_dim
+        model = ConditionalUnet1D(
+            input_dim=action_dim,
+            global_cond_dim=global_cond_dim,
+            diffusion_step_embed_dim=policy_config.diffusion_step_embed_dim,
+            down_dims=policy_config.down_dims,
+            kernel_size=policy_config.kernel_size,
+            n_groups=policy_config.n_groups,
+            cond_predict_scale=policy_config.cond_predict_scale,
+            pos_embedding_period=policy_config.pos_embedding_period,
         )
+
+        # --- MLP variant (commented out, replaced by ConditionalUnet1D above) ---
+        # flat_action_dims = action_dim*policy_config.n_action_steps
+        # global_cond_dim = obs_feature_dim * policy_config.n_obs_steps
+        # model = MLPDiffusionHead(
+        #     input_dim=flat_action_dims + global_cond_dim + policy_config.diffusion_step_embed_dim,
+        #     output_dim=flat_action_dims,
+        #     diffusion_step_embed_dim=policy_config.diffusion_step_embed_dim
+        # )
 
         self.nets["model"] = model
 
