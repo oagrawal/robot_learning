@@ -15,7 +15,7 @@ def main(args):
     # Disable video and npz saving for grid search to save time & space
     eval_config.save_video = False
     eval_config.save_npz = False
-    eval_config.n_rollouts = 30  # As you requested
+    eval_config.n_rollouts = 100  # As you requested
     
     # Load model
     print(f"Loading base model structure from {args.checkpoint}")
@@ -42,25 +42,24 @@ def main(args):
     # Initialize the evaluator
     evaluator = eval_config.evaluator(eval_config=eval_config)
     
-    # Define grid.
-    # Choose reasonable ranges that avoid Unconditional Cancellation and test Rescale functionality.
-    w_succ_values = [1.0, 1.2, 1.5]
-    w_fail_values = [0.0, 0.1, 0.5]
-    rescale_phi_values = [0.5, 0.7, 1.0]
+    # Phase 1: Find if guidance helps and rough optimal w_succ.
+    # Phase 2 (later): focused sweep around best region + rescale.
+    configurations = [
+        (1.0, 0.0, 0.0),   # Pure conditional (baseline comparison)
+        (1.5, 0.0, 0.0),   # Mild positive guidance
+        (2.0, 0.0, 0.0),   # Standard positive guidance
+        (3.0, 0.0, 0.0),   # Strong positive guidance
+        (5.0, 0.0, 0.0),   # Aggressive (find where it breaks)
+        (2.0, 0.5, 0.0),   # Moderate guidance + failure repulsion
+        (2.0, 1.0, 0.0),   # Moderate guidance + strong failure repulsion
+    ]
     
     results = []
     
-    total_configs = len(w_succ_values) * len(w_fail_values) * len(rescale_phi_values)
-    print(f"\nStarting Grid Search. Total configurations to evaluate: {total_configs}")
+    total_configs = len(configurations)
+    print(f"\nStarting Targeted Evaluation. Total configurations to evaluate: {total_configs}")
     
-    for w_s, w_f, phi in itertools.product(w_succ_values, w_fail_values, rescale_phi_values):
-        # Skip configurations that cause mathematical cancellation (w_succ - w_fail == 1.0)
-        # except for the pure conditional baseline (1.0 - 0.0)
-        if abs((w_s - w_f) - 1.0) < 1e-5 and w_s != 1.0:
-            print(f"\nSkipping functionally broken config: w_succ={w_s:.1f}, w_fail={w_f:.1f} (Uncond Cancellation)")
-            continue
-
-        print(f"\n{'-'*55}")
+    for w_s, w_f, phi in configurations:
         print(f"Evaluating --- w_succ = {w_s:.1f} | w_fail = {w_f:.1f} | rescale_phi = {phi:.1f}")
         print(f"{'-'*55}")
         
