@@ -68,9 +68,9 @@ def main(args):
         model.w_fail = w_f
         model.rescale_phi = phi
         
-        # Run evaluation (rollouts)
+        # Run evaluation with fixed seed so every config gets the same initial states
         with torch.no_grad():
-            eval_info = evaluator.evaluate(model)
+            eval_info = evaluator.evaluate(model, seed=args.seed)
         
         succ_rate = eval_info['success_rate']
         mean_steps = eval_info['mean_timesteps']
@@ -110,5 +110,6 @@ if __name__ == '__main__':
     parser.add_argument("--checkpoint", type=str, required=True, help="Path to a standard weights_epN.pth file to build the architecture")
     parser.add_argument("--state_dict", type=str, default=None, help="Optional: Path to a raw state_dict (like best_val_model.pth) to override the weights.")
     parser.add_argument("--output", type=str, default="grid_search_results.csv", help="Where to save the CSV results")
+    parser.add_argument("--seed", type=int, default=42, help="Fixed RNG seed so every config gets identical initial states")
     args = parser.parse_args()
     main(args)
