@@ -16,7 +16,7 @@ action_horizon = 8
 
 train_config = AttrDict(
     output_dir="~/robot_learning/experiments",
-    batch_size=256,
+    batch_size=64,
     num_epochs=1000,
     epoch_every_n_steps=500,
     log_every_n_epochs=1,
