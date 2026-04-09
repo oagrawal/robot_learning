@@ -28,8 +28,8 @@ train_config = AttrDict(
 
 data_config = AttrDict(
     data=[
-        "./data/success.hdf5",          # positive demos (c=1)
-        "./data/failure_labeled.hdf5"   # negative demos (c from label_timesteps.py)
+        "./data/square_d0.hdf5",        # positive demos (c=1)
+        "./data/failure_dense_labeled_1000.hdf5"   # negative demos (c from label_timesteps.py)
     ],
     dataset_class=CFGSequenceDataset,
     dataset_kwargs=dict(
