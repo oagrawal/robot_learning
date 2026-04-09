@@ -40,10 +40,7 @@ observation_config = AttrDict(
             "robot0_eef_quat",
             "robot0_gripper_qpos",
         ],
-        rgb=[
-            "agentview_image",
-            "robot0_eye_in_hand_image",
-        ],
+        rgb=[],
         depth=[],
     ),
     obs_keys_to_normalize={
