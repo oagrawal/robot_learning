@@ -29,6 +29,7 @@ data_config = AttrDict(
     dataset_kwargs=dict(
         num_pos=1,
         window_size=3,
+        max_demo_len=None,
     ),
 )
 

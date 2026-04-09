@@ -17,7 +17,7 @@ import argparse
 import numpy as np
 import torch
 import torch.nn as nn
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, WeightedRandomSampler
 from tqdm import tqdm
 from importlib.machinery import SourceFileLoader
 from sklearn.metrics import roc_auc_score, accuracy_score
@@ -167,7 +167,12 @@ def main(args):
     train_dataset = data_config.dataset_class(data_paths=data_config.data, split='train', **ds_kwargs)
     val_dataset = data_config.dataset_class(data_paths=data_config.data, split='val', **ds_kwargs)
 
-    train_loader = DataLoader(train_dataset, batch_size=train_config.batch_size, shuffle=True, num_workers=train_config.num_workers)
+    train_sampler = WeightedRandomSampler(
+        weights=train_dataset.sample_weights,
+        num_samples=len(train_dataset),
+        replacement=True,
+    )
+    train_loader = DataLoader(train_dataset, batch_size=train_config.batch_size, sampler=train_sampler, num_workers=train_config.num_workers)
     val_loader = DataLoader(val_dataset, batch_size=train_config.batch_size, shuffle=False, num_workers=train_config.num_workers)
 
     print(f"Train samples: {len(train_dataset)}, Val samples: {len(val_dataset)}")

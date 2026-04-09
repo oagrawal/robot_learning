@@ -22,9 +22,10 @@ class ClassifierDataset(torch.utils.data.Dataset):
         obs_keys_to_modality: Dict mapping obs key names to modality type.
         split: 'train' or 'val'.
     """
-    SPLIT = AttrDict(train=0.95, val=0.05)
+    SPLIT = AttrDict(train=0.80, val=0.20)
 
     def __init__(self, data_paths, num_pos=1, window_size=3,
+                 max_demo_len=None,
                  obs_keys_to_modality={}, obs_keys_to_normalize={},
                  split='train', **kwargs):
         super().__init__()
@@ -34,6 +35,7 @@ class ClassifierDataset(torch.utils.data.Dataset):
         self.obs_keys = tuple(obs_keys_to_modality.keys())
         self.obs_keys_to_modality = obs_keys_to_modality
         self.window_size = window_size
+        self.max_demo_len = max_demo_len
         self.split = split
         self.num_pos = num_pos
 
@@ -42,27 +44,67 @@ class ClassifierDataset(torch.utils.data.Dataset):
         self._compute_normalization_stats(list(obs_keys_to_normalize.keys()))
 
     def _build_index(self):
-        """Build a flat index: each entry is (file_idx, demo_key, timestep, label)."""
+        """Build a flat index: each entry is (file_idx, demo_key, timestep, label).
+        Split is done at the demo level with stratification so both classes
+        appear in both train and val."""
         self.index = []
         self.hdf5_use_swmr = True
 
+        pos_demos = []  # (file_idx, demo_key, demo_len)
+        neg_demos = []
+
         for file_idx, path in enumerate(self.hdf5_paths):
-            label = 1.0 if file_idx < self.num_pos else 0.0
+            is_pos = file_idx < self.num_pos
             with h5py.File(path, 'r', swmr=True, libver='latest') as f:
                 demos = sorted(f['data'].keys(), key=lambda x: int(x.split('_')[-1]))
                 for demo_key in demos:
                     demo_len = f[f'data/{demo_key}/actions'].shape[0]
-                    num_windows = max(0, demo_len - self.window_size + 1)
-                    for t in range(num_windows):
-                        self.index.append((file_idx, demo_key, t, label))
+                    entry = (file_idx, demo_key, demo_len)
+                    if is_pos:
+                        pos_demos.append(entry)
+                    else:
+                        neg_demos.append(entry)
 
-        total = len(self.index)
-        self.train_split = int(self.SPLIT.train * total)
+        rng = np.random.RandomState(42)
+        rng.shuffle(pos_demos)
+        rng.shuffle(neg_demos)
+
+        def split_demos(demos):
+            n_train = max(1, int(self.SPLIT.train * len(demos)))
+            return demos[:n_train], demos[n_train:]
+
+        pos_train, pos_val = split_demos(pos_demos)
+        neg_train, neg_val = split_demos(neg_demos)
 
         if self.split == 'train':
-            self.index = self.index[:self.train_split]
-        elif self.split == 'val':
-            self.index = self.index[self.train_split:]
+            selected = [(d, 1.0) for d in pos_train] + [(d, 0.0) for d in neg_train]
+        else:
+            selected = [(d, 1.0) for d in pos_val] + [(d, 0.0) for d in neg_val]
+
+        for (file_idx, demo_key, demo_len), label in selected:
+            effective_len = demo_len
+            if self.max_demo_len is not None and label == 0.0:
+                effective_len = min(demo_len, self.max_demo_len)
+            num_windows = max(0, effective_len - self.window_size + 1)
+            for t in range(num_windows):
+                self.index.append((file_idx, demo_key, t, label))
+
+        self._build_sample_weights()
+
+    def _build_sample_weights(self):
+        """Compute per-sample weights so that each class contributes equally
+        to the training loss despite different window counts."""
+        labels = np.array([entry[3] for entry in self.index])
+        n_pos = (labels == 1.0).sum()
+        n_neg = (labels == 0.0).sum()
+        total = n_pos + n_neg
+
+        w_pos = total / (2.0 * max(n_pos, 1))
+        w_neg = total / (2.0 * max(n_neg, 1))
+
+        self.sample_weights = np.where(labels == 1.0, w_pos, w_neg)
+        print(f"ClassifierDataset [{self.split}]: {n_pos} pos windows, {n_neg} neg windows "
+              f"(weights: pos={w_pos:.2f}, neg={w_neg:.2f})")
 
     def _cache_low_dim(self):
         """Cache low-dim obs and actions in memory for fast access."""
