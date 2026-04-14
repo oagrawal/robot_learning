@@ -56,7 +56,7 @@ class TrajectoryClassifier(nn.Module):
         """
         Args:
             obs_dict: {key: (B, window_size, ...)} observation tensors
-            actions:  (B, window_size, action_dim)
+            actions:  (B, window_size, action_dim) — pre-normalized actions
         Returns:
             logits: (B, 1) raw logits (apply sigmoid for probability)
         """

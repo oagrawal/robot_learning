@@ -135,21 +135,25 @@ class ClassifierDataset(torch.utils.data.Dataset):
         return self._hdf5_files
 
     def _compute_normalization_stats(self, obs_keys_to_normalize):
-        """Compute normalization stats from positive (success) data only."""
+        """Compute normalization stats from positive (success) data only.
+        Also computes action stats so the classifier can operate in
+        the same normalized action space as the flow policy."""
         merged = None
         for file_idx in range(self.num_pos):
             path = self.hdf5_paths[file_idx]
             with h5py.File(path, 'r', swmr=True, libver='latest') as f:
                 demos = sorted(f['data'].keys(), key=lambda x: int(x.split('_')[-1]))
                 for demo_key in demos:
-                    obs_traj = {}
+                    data_dict = {}
                     for k in obs_keys_to_normalize:
                         arr = f[f'data/{demo_key}/obs/{k}'][()].astype(np.float32)
                         arr = process_obs_dict({k: arr}, self.obs_keys_to_modality)[k]
-                        obs_traj[k] = arr
+                        data_dict[k] = arr
+
+                    data_dict['actions'] = f[f'data/{demo_key}/actions'][()].astype(np.float32)
 
                     stats = {}
-                    for k, v in obs_traj.items():
+                    for k, v in data_dict.items():
                         stats[k] = {
                             'n': v.shape[0],
                             'mean': v.mean(axis=0, keepdims=True),
@@ -182,12 +186,20 @@ class ClassifierDataset(torch.utils.data.Dataset):
     def __len__(self):
         return len(self.index)
 
+    def _normalize_actions(self, actions):
+        """Normalize actions using precomputed stats (same as flow policy)."""
+        if 'actions' in self.normalization_stats:
+            mean = self.normalization_stats['actions']['mean']
+            std = self.normalization_stats['actions']['std']
+            return (actions - mean) / std
+        return actions
+
     def __getitem__(self, idx):
         file_idx, demo_key, t, label = self.index[idx]
         timesteps = np.arange(t, t + self.window_size)
 
         cache = self.cache[file_idx][demo_key]
-        actions = cache['actions'][timesteps]
+        actions = self._normalize_actions(cache['actions'][timesteps])
 
         obs = {}
         for k in self.obs_keys:
@@ -219,7 +231,7 @@ class ClassifierDataset(torch.utils.data.Dataset):
 
         for t in range(num_windows):
             timesteps = np.arange(t, t + self.window_size)
-            all_actions.append(cache['actions'][timesteps])
+            all_actions.append(self._normalize_actions(cache['actions'][timesteps]))
             for k in self.obs_keys:
                 cache_key = f'obs/{k}'
                 if cache_key in cache:
