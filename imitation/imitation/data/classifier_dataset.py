@@ -1,3 +1,4 @@
+import json
 import os
 import h5py
 import numpy as np
@@ -10,47 +11,138 @@ from imitation.utils.obs_utils import process_obs_dict
 
 class ClassifierDataset(torch.utils.data.Dataset):
     """
-    Dataset for training a success/failure trajectory classifier.
+    Trajectory-level success classifier samples aligned with FM inference:
+      obs: last n_obs_steps frames (low_dim + optional RGB)
+      actions: action_chunk_size actions from anchor t (clamped at demo end)
 
-    Each sample is a window of (obs, action) pairs from a single demo,
-    labeled by the demo's outcome (1.0 = success, 0.0 = failure).
+    Labels: 1.0 success demo, 0.0 failure demo. Splits are by whole demos only.
 
-    Args:
-        data_paths: List of HDF5 paths. First num_pos are success, rest failure.
-        num_pos: Number of positive (success) data paths.
-        window_size: Number of consecutive timesteps per sample.
-        obs_keys_to_modality: Dict mapping obs key names to modality type.
-        split: 'train' or 'val'.
+    Optional 3-way split: set n_val_demos_per_class and n_test_demos_per_class (e.g. 30, 30).
+    Optional hard val/test: hard_val_json / hard_test_json (absolute paths) with failure_regions;
+      index = critical failure anchors + matched random success anchors (N_pos = N_neg).
     """
+
     SPLIT = AttrDict(train=0.80, val=0.20)
 
-    def __init__(self, data_paths, num_pos=1, window_size=3,
-                 max_demo_len=None,
-                 obs_keys_to_modality={}, obs_keys_to_normalize={},
-                 split='train', **kwargs):
+    def __init__(
+        self,
+        data_paths,
+        num_pos=1,
+        n_obs_steps=2,
+        action_chunk_size=8,
+        max_demo_len=None,
+        obs_keys_to_modality=None,
+        obs_keys_to_normalize=None,
+        split='train',
+        n_val_demos_per_class=None,
+        n_test_demos_per_class=None,
+        hard_val_json=None,
+        hard_test_json=None,
+        ablation_mode='action_and_state',
+        hard_eval_seed=42,
+        **kwargs,
+    ):
         super().__init__()
+
+        if kwargs.pop('window_size', None) is not None:
+            import warnings
+            warnings.warn(
+                "ClassifierDataset: window_size is ignored; use n_obs_steps and action_chunk_size",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+
+        obs_keys_to_modality = obs_keys_to_modality or {}
+        obs_keys_to_normalize = obs_keys_to_normalize or {}
 
         assert isinstance(data_paths, list)
         self.hdf5_paths = [os.path.expanduser(p) for p in data_paths]
         self.obs_keys = tuple(obs_keys_to_modality.keys())
         self.obs_keys_to_modality = obs_keys_to_modality
-        self.window_size = window_size
+        self.n_obs_steps = int(n_obs_steps)
+        self.action_chunk_size = int(action_chunk_size)
         self.max_demo_len = max_demo_len
         self.split = split
         self.num_pos = num_pos
+        self.ablation_mode = ablation_mode
+        self.hard_eval_seed = int(hard_eval_seed)
+
+        self.n_val_demos_per_class = n_val_demos_per_class
+        self.n_test_demos_per_class = n_test_demos_per_class
+        self.hard_val_json = os.path.expanduser(hard_val_json) if hard_val_json else None
+        self.hard_test_json = os.path.expanduser(hard_test_json) if hard_test_json else None
 
         self._build_index()
         self._cache_low_dim()
         self._compute_normalization_stats(list(obs_keys_to_normalize.keys()))
 
+    def _three_way_split(self):
+        return (
+            self.n_val_demos_per_class is not None
+            and self.n_test_demos_per_class is not None
+        )
+
+    def _load_hard_json(self, path):
+        with open(path, 'r') as f:
+            data = json.load(f)
+        return data.get('failure_regions', data)
+
+    def _build_index_hard(self, json_path, pos_pool, neg_pool):
+        """
+        pos_pool: val/test success demos (file_idx, demo_key, demo_len).
+        neg_pool: val/test failure demos — JSON failure demos must belong here.
+        """
+        neg_demo_set = {(fi, dk) for fi, dk, _ in neg_pool}
+        if not pos_pool:
+            raise ValueError("Hard eval requires at least one success demo in this split")
+
+        regions = self._load_hard_json(json_path)
+        neg_entries = []
+        for r in regions:
+            file_idx = int(r['file_idx'])
+            demo_key = r['demo_key']
+            start_t = int(r['start_t'])
+            end_t = int(r['end_t'])
+            if (file_idx, demo_key) not in neg_demo_set:
+                raise ValueError(
+                    f"Annotated failure ({file_idx}, {demo_key}) not in this split's failure pool"
+                )
+            for t in range(start_t, end_t + 1):
+                neg_entries.append((file_idx, demo_key, t, 0.0))
+
+        n_neg = len(neg_entries)
+        if n_neg == 0:
+            raise ValueError(f"No negative rows from {json_path}")
+
+        rng = np.random.RandomState(self.hard_eval_seed)
+        pos_entries = []
+        for _ in range(n_neg):
+            fi, dk, dlen = pos_pool[rng.randint(0, len(pos_pool))]
+            t = rng.randint(0, max(1, dlen))
+            pos_entries.append((fi, dk, t, 1.0))
+
+        self.index = neg_entries + pos_entries
+        self.sample_weights = np.ones(len(self.index), dtype=np.float64)
+        print(
+            f"ClassifierDataset [{self.split}] HARD EVAL: {n_neg} neg + {n_neg} pos = {len(self.index)} "
+            f"(from {json_path})"
+        )
+
+    def _build_index_standard(self, selected):
+        self.index = []
+        for (file_idx, demo_key, demo_len), label in selected:
+            effective_len = demo_len
+            if self.max_demo_len is not None and label == 0.0:
+                effective_len = min(demo_len, self.max_demo_len)
+            for t in range(effective_len):
+                self.index.append((file_idx, demo_key, t, label))
+        self._build_sample_weights()
+
     def _build_index(self):
-        """Build a flat index: each entry is (file_idx, demo_key, timestep, label).
-        Split is done at the demo level with stratification so both classes
-        appear in both train and val."""
         self.index = []
         self.hdf5_use_swmr = True
 
-        pos_demos = []  # (file_idx, demo_key, demo_len)
+        pos_demos = []
         neg_demos = []
 
         for file_idx, path in enumerate(self.hdf5_paths):
@@ -69,31 +161,61 @@ class ClassifierDataset(torch.utils.data.Dataset):
         rng.shuffle(pos_demos)
         rng.shuffle(neg_demos)
 
-        def split_demos(demos):
-            n_train = max(1, int(self.SPLIT.train * len(demos)))
-            return demos[:n_train], demos[n_train:]
+        use_three = self._three_way_split()
+        if use_three:
+            n_val = int(self.n_val_demos_per_class)
+            n_test = int(self.n_test_demos_per_class)
 
-        pos_train, pos_val = split_demos(pos_demos)
-        neg_train, neg_val = split_demos(neg_demos)
+            def split_three(demos):
+                n = len(demos)
+                if n < n_val + n_test + 1:
+                    raise ValueError(
+                        f"Need at least n_val+n_test+1={n_val + n_test + 1} demos, got {n}"
+                    )
+                n_train = n - n_val - n_test
+                return demos[:n_train], demos[n_train:n_train + n_val], demos[n_train + n_val:]
 
-        if self.split == 'train':
-            selected = [(d, 1.0) for d in pos_train] + [(d, 0.0) for d in neg_train]
+            pos_train, pos_val, pos_test = split_three(pos_demos)
+            neg_train, neg_val, neg_test = split_three(neg_demos)
+
+            if self.split == 'train':
+                selected = [(d, 1.0) for d in pos_train] + [(d, 0.0) for d in neg_train]
+            elif self.split == 'val':
+                if self.hard_val_json and os.path.isfile(self.hard_val_json):
+                    self._build_index_hard(self.hard_val_json, pos_val, neg_val)
+                    return
+                selected = [(d, 1.0) for d in pos_val] + [(d, 0.0) for d in neg_val]
+            elif self.split == 'test':
+                if self.hard_test_json and os.path.isfile(self.hard_test_json):
+                    self._build_index_hard(self.hard_test_json, pos_test, neg_test)
+                    return
+                selected = [(d, 1.0) for d in pos_test] + [(d, 0.0) for d in neg_test]
+            else:
+                raise ValueError(f"Unknown split {self.split}")
         else:
-            selected = [(d, 1.0) for d in pos_val] + [(d, 0.0) for d in neg_val]
+            if self.split == 'test':
+                raise ValueError(
+                    "split='test' requires n_val_demos_per_class and n_test_demos_per_class"
+                )
 
-        for (file_idx, demo_key, demo_len), label in selected:
-            effective_len = demo_len
-            if self.max_demo_len is not None and label == 0.0:
-                effective_len = min(demo_len, self.max_demo_len)
-            num_windows = max(0, effective_len - self.window_size + 1)
-            for t in range(num_windows):
-                self.index.append((file_idx, demo_key, t, label))
+            def split_two(demos):
+                n_train = max(1, int(self.SPLIT.train * len(demos)))
+                return demos[:n_train], demos[n_train:]
 
-        self._build_sample_weights()
+            pos_train, pos_val = split_two(pos_demos)
+            neg_train, neg_val = split_two(neg_demos)
+
+            if self.split == 'train':
+                selected = [(d, 1.0) for d in pos_train] + [(d, 0.0) for d in neg_train]
+            else:
+                if self.hard_val_json and os.path.isfile(self.hard_val_json):
+                    self._build_index_hard(self.hard_val_json, pos_val, neg_val)
+                    return
+                selected = [(d, 1.0) for d in pos_val] + [(d, 0.0) for d in neg_val]
+
+        self._build_index_standard(selected)
 
     def _build_sample_weights(self):
-        """Compute per-sample weights so that each class contributes equally
-        to the training loss despite different window counts."""
         labels = np.array([entry[3] for entry in self.index])
         n_pos = (labels == 1.0).sum()
         n_neg = (labels == 0.0).sum()
@@ -103,11 +225,12 @@ class ClassifierDataset(torch.utils.data.Dataset):
         w_neg = total / (2.0 * max(n_neg, 1))
 
         self.sample_weights = np.where(labels == 1.0, w_pos, w_neg)
-        print(f"ClassifierDataset [{self.split}]: {n_pos} pos windows, {n_neg} neg windows "
-              f"(weights: pos={w_pos:.2f}, neg={w_neg:.2f})")
+        print(
+            f"ClassifierDataset [{self.split}]: {n_pos} pos windows, {n_neg} neg windows "
+            f"(weights: pos={w_pos:.2f}, neg={w_neg:.2f})"
+        )
 
     def _cache_low_dim(self):
-        """Cache low-dim obs and actions in memory for fast access."""
         self.cache = {}
         for file_idx, path in enumerate(self.hdf5_paths):
             print(f"ClassifierDataset: caching low-dim from {path}")
@@ -121,8 +244,9 @@ class ClassifierDataset(torch.utils.data.Dataset):
                     }
                     for k in self.obs_keys:
                         if self.obs_keys_to_modality.get(k) == 'low_dim':
-                            self.cache[file_idx][demo_key][f'obs/{k}'] = \
+                            self.cache[file_idx][demo_key][f'obs/{k}'] = (
                                 demo[f'obs/{k}'][:].astype(np.float32)
+                            )
 
         self._hdf5_files = None
 
@@ -135,9 +259,6 @@ class ClassifierDataset(torch.utils.data.Dataset):
         return self._hdf5_files
 
     def _compute_normalization_stats(self, obs_keys_to_normalize):
-        """Compute normalization stats from positive (success) data only.
-        Also computes action stats so the classifier can operate in
-        the same normalized action space as the flow policy."""
         merged = None
         for file_idx in range(self.num_pos):
             path = self.hdf5_paths[file_idx]
@@ -157,7 +278,9 @@ class ClassifierDataset(torch.utils.data.Dataset):
                         stats[k] = {
                             'n': v.shape[0],
                             'mean': v.mean(axis=0, keepdims=True),
-                            'sqdiff': ((v - v.mean(axis=0, keepdims=True)) ** 2).sum(axis=0, keepdims=True),
+                            'sqdiff': ((v - v.mean(axis=0, keepdims=True)) ** 2).sum(
+                                axis=0, keepdims=True
+                            ),
                         }
 
                     if merged is None:
@@ -168,8 +291,14 @@ class ClassifierDataset(torch.utils.data.Dataset):
                             n_b = stats[k]['n']
                             n = n_a + n_b
                             delta = stats[k]['mean'] - merged[k]['mean']
-                            merged[k]['mean'] = (n_a * merged[k]['mean'] + n_b * stats[k]['mean']) / n
-                            merged[k]['sqdiff'] = merged[k]['sqdiff'] + stats[k]['sqdiff'] + delta**2 * n_a * n_b / n
+                            merged[k]['mean'] = (
+                                n_a * merged[k]['mean'] + n_b * stats[k]['mean']
+                            ) / n
+                            merged[k]['sqdiff'] = (
+                                merged[k]['sqdiff']
+                                + stats[k]['sqdiff']
+                                + delta**2 * n_a * n_b / n
+                            )
                             merged[k]['n'] = n
 
         self.normalization_stats = {}
@@ -177,7 +306,9 @@ class ClassifierDataset(torch.utils.data.Dataset):
             for k in merged:
                 self.normalization_stats[k] = {
                     'mean': merged[k]['mean'].astype(np.float32),
-                    'std': (np.sqrt(merged[k]['sqdiff'] / merged[k]['n']) + 1e-6).astype(np.float32),
+                    'std': (np.sqrt(merged[k]['sqdiff'] / merged[k]['n']) + 1e-6).astype(
+                        np.float32
+                    ),
                 }
 
     def get_normalization_stats(self):
@@ -187,28 +318,64 @@ class ClassifierDataset(torch.utils.data.Dataset):
         return len(self.index)
 
     def _normalize_actions(self, actions):
-        """Normalize actions using precomputed stats (same as flow policy)."""
         if 'actions' in self.normalization_stats:
             mean = self.normalization_stats['actions']['mean']
             std = self.normalization_stats['actions']['std']
             return (actions - mean) / std
         return actions
 
-    def __getitem__(self, idx):
-        file_idx, demo_key, t, label = self.index[idx]
-        timesteps = np.arange(t, t + self.window_size)
-
-        cache = self.cache[file_idx][demo_key]
-        actions = self._normalize_actions(cache['actions'][timesteps])
-
+    def _read_obs_frame(self, file_idx, demo_key, t):
         obs = {}
+        cache = self.cache[file_idx][demo_key]
         for k in self.obs_keys:
             cache_key = f'obs/{k}'
             if cache_key in cache:
-                obs[k] = cache[cache_key][timesteps]
+                obs[k] = cache[cache_key][t].copy()
             else:
                 hdf5_data = self.hdf5_files[file_idx][f'data/{demo_key}/obs/{k}']
-                obs[k] = hdf5_data[timesteps[0]:timesteps[-1]+1].astype(np.float32)
+                obs[k] = hdf5_data[t].astype(np.float32)
+        return obs
+
+    def _stack_obs_window(self, file_idx, demo_key, anchor_t):
+        cache = self.cache[file_idx][demo_key]
+        demo_len = cache['actions'].shape[0]
+        obs_window = {k: [] for k in self.obs_keys}
+        for i in range(self.n_obs_steps):
+            tt = anchor_t - self.n_obs_steps + 1 + i
+            tt = max(0, min(tt, demo_len - 1))
+            frame = self._read_obs_frame(file_idx, demo_key, tt)
+            for k in self.obs_keys:
+                obs_window[k].append(frame[k])
+        return {k: np.stack(obs_window[k], axis=0) for k in self.obs_keys}
+
+    def _action_chunk(self, file_idx, demo_key, anchor_t):
+        cache = self.cache[file_idx][demo_key]
+        demo_len = cache['actions'].shape[0]
+        idx = np.arange(anchor_t, anchor_t + self.action_chunk_size)
+        idx = np.minimum(idx, demo_len - 1)
+        raw = cache['actions'][idx]
+        return self._normalize_actions(raw.astype(np.float32))
+
+    def __getitem__(self, idx):
+        file_idx, demo_key, t, label = self.index[idx]
+        t = int(t)
+
+        obs = self._stack_obs_window(file_idx, demo_key, t)
+        actions = self._action_chunk(file_idx, demo_key, t)
+
+        if self.ablation_mode == 'action_only':
+            for k in obs:
+                obs[k] = np.zeros_like(obs[k])
+        elif self.ablation_mode == 'state_only':
+            actions = np.zeros_like(actions)
+        elif self.ablation_mode == 'shuffled_actions':
+            rng = np.random.RandomState(
+                (hash((file_idx, demo_key, t, self.split)) % (2**31))
+            )
+            perm = rng.permutation(self.action_chunk_size)
+            actions = actions[perm].copy()
+        elif self.ablation_mode != 'action_and_state':
+            raise ValueError(f"Unknown ablation_mode {self.ablation_mode}")
 
         return {
             'obs': obs,
@@ -217,38 +384,29 @@ class ClassifierDataset(torch.utils.data.Dataset):
         }
 
     def get_trajectory_data(self, file_idx, demo_key):
-        """
-        Return the full trajectory for visualization: all windows from one demo.
-        Returns obs, actions, label for every valid window start timestep.
-        """
         cache = self.cache[file_idx][demo_key]
         demo_len = cache['actions'].shape[0]
-        num_windows = max(0, demo_len - self.window_size + 1)
         label = 1.0 if file_idx < self.num_pos else 0.0
 
         all_obs = {k: [] for k in self.obs_keys}
         all_actions = []
 
-        for t in range(num_windows):
-            timesteps = np.arange(t, t + self.window_size)
-            all_actions.append(self._normalize_actions(cache['actions'][timesteps]))
+        for t in range(demo_len):
+            ow = self._stack_obs_window(file_idx, demo_key, t)
+            ac = self._action_chunk(file_idx, demo_key, t)
             for k in self.obs_keys:
-                cache_key = f'obs/{k}'
-                if cache_key in cache:
-                    all_obs[k].append(cache[cache_key][timesteps])
-                else:
-                    hdf5_data = self.hdf5_files[file_idx][f'data/{demo_key}/obs/{k}']
-                    all_obs[k].append(hdf5_data[t:t+self.window_size].astype(np.float32))
+                all_obs[k].append(ow[k])
+            all_actions.append(ac)
 
         return {
-            'obs': {k: np.stack(v) for k, v in all_obs.items()},
-            'actions': np.stack(all_actions),
+            'obs': {k: np.stack(all_obs[k], axis=0) for k in self.obs_keys},
+            'actions': np.stack(all_actions, axis=0),
             'label': label,
             'demo_len': demo_len,
         }
 
     def __del__(self):
-        if self._hdf5_files is not None:
+        if getattr(self, '_hdf5_files', None) is not None:
             for f in self._hdf5_files:
                 f.close()
             self._hdf5_files = None
