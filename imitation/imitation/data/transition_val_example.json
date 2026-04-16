@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "description": "Hard val/test: failure anchor timesteps t where start_t <= t <= end_t (inclusive). file_idx matches data_config.data order (0 = first HDF5, 1 = second, ...).",
+  "hdf5_path": "/absolute/path/to/your/failure_dense_labeled_1000.hdf5",
+  "file_idx": 1,
+  "failure_regions": [
+    {
+      "file_idx": 1,
+      "demo_key": "demo_0",
+      "start_t": 118,
+      "end_t": 132,
+      "notes": "Replace with your demo_key and timesteps from visualize_demo_labeling.py"
+    },
+    {
+      "file_idx": 1,
+      "demo_key": "demo_1",
+      "start_t": 125,
+      "end_t": 125,
+      "notes": "Single-timestep region: start_t == end_t is valid"
+    }
+  ]
+}
