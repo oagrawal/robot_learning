@@ -1,15 +1,10 @@
 """
-Train a binary success/failure trajectory classifier.
+Train a binary trajectory classifier (obs frames + action chunk).
 
 Usage:
-    python train_classifier.py \
-        --config ./config/model/classifier_config.py \
+    python train_classifier.py \\
+        --config ./config/model/classifier_config.py \\
         --exp_name classifier_v1
-
-Produces:
-    - Saved model checkpoints
-    - Per-trajectory prediction plots (P(success) over time)
-    - Val accuracy, AUC, and critical-point accuracy logged to wandb
 """
 
 import os
@@ -17,6 +12,7 @@ import argparse
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torch.utils.data import DataLoader, WeightedRandomSampler
 from tqdm import tqdm
 from importlib.machinery import SourceFileLoader
@@ -25,7 +21,11 @@ from sklearn.metrics import roc_auc_score, accuracy_score
 from imitation.utils.general_utils import AttrDict
 from imitation.utils.obs_utils import process_obs_dict
 from imitation.utils.tensor_utils import recursive_dict_list_tuple_apply
-from imitation.utils.file_utils import get_all_obs_keys_from_config, get_shape_metadata_from_dataset, get_obs_key_to_modality_from_config
+from imitation.utils.file_utils import (
+    get_all_obs_keys_from_config,
+    get_shape_metadata_from_dataset,
+    get_obs_key_to_modality_from_config,
+)
 from imitation.models.trajectory_classifier import TrajectoryClassifier
 
 DEVICE = 'cuda'
@@ -33,6 +33,24 @@ DEVICE = 'cuda'
 LOG = True
 WANDB_PROJECT_NAME = 'trajectory-classifier'
 WANDB_ENTITY_NAME = 'learning-with-negative-examples'
+
+
+class FocalBCEWithLogitsLoss(nn.Module):
+    """Downweight easy examples when gamma > 0; gamma=0 is standard BCE."""
+
+    def __init__(self, gamma=2.0):
+        super().__init__()
+        self.gamma = float(gamma)
+
+    def forward(self, logits, targets):
+        targets = targets.float()
+        bce = F.binary_cross_entropy_with_logits(logits, targets, reduction='none')
+        if self.gamma <= 0.0:
+            return bce.mean()
+        prob = torch.sigmoid(logits)
+        p_t = prob * targets + (1.0 - prob) * (1.0 - targets)
+        w = (1.0 - p_t).clamp(min=1e-6).pow(self.gamma)
+        return (w * bce).mean()
 
 
 def build_model_config(conf, normalization_stats, shape_meta, obs_key_to_modality):
@@ -45,7 +63,7 @@ def build_model_config(conf, normalization_stats, shape_meta, obs_key_to_modalit
     )
 
 
-def evaluate(model, val_loader, obs_key_to_modality, criterion):
+def evaluate(model, loader, obs_key_to_modality, criterion):
     model.eval()
     all_labels = []
     all_probs = []
@@ -53,7 +71,7 @@ def evaluate(model, val_loader, obs_key_to_modality, criterion):
     n_batches = 0
 
     with torch.no_grad():
-        for batch in val_loader:
+        for batch in loader:
             batch['obs'] = process_obs_dict(batch['obs'], obs_key_to_modality)
             batch = recursive_dict_list_tuple_apply(batch, {torch.Tensor: lambda x: x.to(DEVICE).float()})
 
@@ -79,17 +97,13 @@ def evaluate(model, val_loader, obs_key_to_modality, criterion):
         auc = 0.0
 
     return {
-        'val_loss': total_loss / max(n_batches, 1),
-        'val_accuracy': acc,
-        'val_auc': auc,
+        'loss': total_loss / max(n_batches, 1),
+        'accuracy': acc,
+        'auc': auc,
     }
 
 
 def plot_trajectory_predictions(model, dataset, obs_key_to_modality, save_dir, epoch, n_demos=6):
-    """
-    For a few success and failure demos, plot the classifier's P(success)
-    at each timestep. Saves matplotlib figures.
-    """
     try:
         import matplotlib
         matplotlib.use('Agg')
@@ -109,7 +123,7 @@ def plot_trajectory_predictions(model, dataset, obs_key_to_modality, save_dir, e
         label = 1.0 if file_idx < dataset.num_pos else 0.0
         count = 0
         for dk in demo_keys:
-            if count >= n_demos // n_files:
+            if count >= max(1, n_demos // max(n_files, 1)):
                 break
             demos_to_plot.append((file_idx, dk, label))
             count += 1
@@ -118,7 +132,7 @@ def plot_trajectory_predictions(model, dataset, obs_key_to_modality, save_dir, e
         traj_data = dataset.get_trajectory_data(file_idx, demo_key)
         n_windows = traj_data['actions'].shape[0]
 
-        batch_size = 128
+        batch_size = 32
         all_probs = []
         with torch.no_grad():
             for start in range(0, n_windows, batch_size):
@@ -157,7 +171,9 @@ def main(args):
 
     obs_keys = get_all_obs_keys_from_config(conf.observation_config)
     obs_key_to_modality = get_obs_key_to_modality_from_config(conf.observation_config)
-    shape_meta = get_shape_metadata_from_dataset(data_config.data[0], all_obs_keys=obs_keys, obs_key_to_modality=obs_key_to_modality)
+    shape_meta = get_shape_metadata_from_dataset(
+        data_config.data[0], all_obs_keys=obs_keys, obs_key_to_modality=obs_key_to_modality
+    )
 
     print("Building datasets...")
     ds_kwargs = dict(data_config.dataset_kwargs)
@@ -167,15 +183,46 @@ def main(args):
     train_dataset = data_config.dataset_class(data_paths=data_config.data, split='train', **ds_kwargs)
     val_dataset = data_config.dataset_class(data_paths=data_config.data, split='val', **ds_kwargs)
 
+    three_way = (
+        ds_kwargs.get('n_val_demos_per_class') is not None
+        and ds_kwargs.get('n_test_demos_per_class') is not None
+    )
+    test_dataset = None
+    if three_way:
+        test_dataset = data_config.dataset_class(data_paths=data_config.data, split='test', **ds_kwargs)
+
     train_sampler = WeightedRandomSampler(
         weights=train_dataset.sample_weights,
         num_samples=len(train_dataset),
         replacement=True,
     )
-    train_loader = DataLoader(train_dataset, batch_size=train_config.batch_size, sampler=train_sampler, num_workers=train_config.num_workers)
-    val_loader = DataLoader(val_dataset, batch_size=train_config.batch_size, shuffle=False, num_workers=train_config.num_workers)
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=train_config.batch_size,
+        sampler=train_sampler,
+        num_workers=train_config.num_workers,
+        pin_memory=True,
+    )
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=train_config.batch_size,
+        shuffle=False,
+        num_workers=train_config.num_workers,
+        pin_memory=True,
+    )
+    test_loader = None
+    if test_dataset is not None and len(test_dataset) > 0:
+        test_loader = DataLoader(
+            test_dataset,
+            batch_size=train_config.batch_size,
+            shuffle=False,
+            num_workers=train_config.num_workers,
+            pin_memory=True,
+        )
 
     print(f"Train samples: {len(train_dataset)}, Val samples: {len(val_dataset)}")
+    if test_dataset is not None:
+        print(f"Test samples: {len(test_dataset)}")
 
     normalization_stats = train_dataset.get_normalization_stats()
     model_config = build_model_config(conf, normalization_stats, shape_meta, obs_key_to_modality)
@@ -184,9 +231,20 @@ def main(args):
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"Classifier parameters: {n_params:,}")
 
-    optimizer = torch.optim.AdamW(model.parameters(), lr=train_config.lr, weight_decay=train_config.weight_decay)
+    optimizer = torch.optim.AdamW(
+        model.parameters(), lr=train_config.lr, weight_decay=train_config.weight_decay
+    )
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=train_config.num_epochs)
-    criterion = nn.BCEWithLogitsLoss()
+
+    focal_gamma = float(getattr(train_config, 'focal_gamma', 2.0))
+    if focal_gamma > 0.0:
+        criterion = FocalBCEWithLogitsLoss(gamma=focal_gamma)
+        print(f"Using FocalBCEWithLogitsLoss (gamma={focal_gamma})")
+    else:
+        criterion = nn.BCEWithLogitsLoss()
+        print("Using BCEWithLogitsLoss")
+
+    val_criterion = nn.BCEWithLogitsLoss()
 
     output_dir = os.path.expanduser(train_config.output_dir)
     exp_dir = os.path.join(output_dir, args.exp_name)
@@ -202,6 +260,7 @@ def main(args):
             print(f"WandB logging disabled: {e}")
 
     best_auc = 0.0
+    eval_test_every = int(getattr(train_config, 'eval_test_every_n_epochs', 0))
 
     for epoch in range(train_config.num_epochs):
         model.train()
@@ -231,26 +290,46 @@ def main(args):
             logger.log_scalar_dict({'loss': avg_loss}, step=epoch, phase='train')
 
         if (epoch + 1) % train_config.val_every_n_epochs == 0:
-            val_metrics = evaluate(model, val_loader, obs_key_to_modality, criterion)
-            print(f"  Val loss: {val_metrics['val_loss']:.4f} | "
-                  f"Acc: {val_metrics['val_accuracy']:.3f} | "
-                  f"AUC: {val_metrics['val_auc']:.3f}")
+            val_metrics = evaluate(model, val_loader, obs_key_to_modality, val_criterion)
+            print(
+                f"  Val loss: {val_metrics['loss']:.4f} | "
+                f"Acc: {val_metrics['accuracy']:.3f} | "
+                f"AUC: {val_metrics['auc']:.3f}"
+            )
 
             if logger:
-                logger.log_scalar_dict(val_metrics, step=epoch, phase='val')
+                m = {f'val_{k}': v for k, v in val_metrics.items()}
+                logger.log_scalar_dict(m, step=epoch, phase='val')
 
-            if val_metrics['val_auc'] > best_auc:
-                best_auc = val_metrics['val_auc']
+            if val_metrics['auc'] > best_auc:
+                best_auc = val_metrics['auc']
                 model.save(os.path.join(exp_dir, 'best_classifier.pth'))
-                print(f"  New best AUC: {best_auc:.3f}")
+                print(f"  New best val AUC: {best_auc:.3f}")
 
             plot_trajectory_predictions(
-                model, val_dataset, obs_key_to_modality, plot_dir, epoch,
-                n_demos=6
+                model, val_dataset, obs_key_to_modality, plot_dir, epoch, n_demos=6
             )
+
+            if test_loader is not None and eval_test_every > 0 and (epoch + 1) % eval_test_every == 0:
+                test_metrics = evaluate(model, test_loader, obs_key_to_modality, val_criterion)
+                print(
+                    f"  Test loss: {test_metrics['loss']:.4f} | "
+                    f"Acc: {test_metrics['accuracy']:.3f} | "
+                    f"AUC: {test_metrics['auc']:.3f}"
+                )
+                if logger:
+                    tm = {f'test_{k}': v for k, v in test_metrics.items()}
+                    logger.log_scalar_dict(tm, step=epoch, phase='test')
 
         if (epoch + 1) % train_config.save_every_n_epochs == 0:
             model.save(os.path.join(exp_dir, f'classifier_ep{epoch+1}.pth'))
+
+    if test_loader is not None:
+        test_metrics = evaluate(model, test_loader, obs_key_to_modality, val_criterion)
+        print(
+            f"\nFinal test | loss: {test_metrics['loss']:.4f} | "
+            f"Acc: {test_metrics['accuracy']:.3f} | AUC: {test_metrics['auc']:.3f}"
+        )
 
     model.save(os.path.join(exp_dir, 'classifier_final.pth'))
     print(f"\nTraining complete. Best val AUC: {best_auc:.3f}")

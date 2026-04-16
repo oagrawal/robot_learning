@@ -5,19 +5,23 @@ from imitation.data.classifier_dataset import ClassifierDataset
 import torch.nn as nn
 from collections import OrderedDict
 
+# Match FlowPolicy: 2 obs frames, 8 action chunk (see flow_policy_config.py)
 classifier_config = AttrDict(
-    window_size=3,
+    n_obs_steps=2,
+    action_chunk_size=8,
 )
 
 train_config = AttrDict(
     output_dir="~/robot_learning/experiments",
-    batch_size=256,
+    batch_size=64,
     num_epochs=100,
     lr=1e-4,
     weight_decay=1e-4,
     val_every_n_epochs=5,
     save_every_n_epochs=10,
-    num_workers=10,
+    num_workers=4,
+    focal_gamma=2.0,
+    eval_test_every_n_epochs=0,
 )
 
 data_config = AttrDict(
@@ -28,8 +32,15 @@ data_config = AttrDict(
     dataset_class=ClassifierDataset,
     dataset_kwargs=dict(
         num_pos=1,
-        window_size=3,
+        n_obs_steps=2,
+        action_chunk_size=8,
         max_demo_len=None,
+        n_val_demos_per_class=30,
+        n_test_demos_per_class=30,
+        ablation_mode="action_and_state",
+        hard_eval_seed=42,
+        hard_val_json=None,
+        hard_test_json=None,
     ),
 )
 
@@ -40,7 +51,10 @@ observation_config = AttrDict(
             "robot0_eef_quat",
             "robot0_gripper_qpos",
         ],
-        rgb=[],
+        rgb=[
+            "agentview_image",
+            "robot0_eye_in_hand_image",
+        ],
         depth=[],
     ),
     obs_keys_to_normalize={
