@@ -1,8 +1,9 @@
 """
 Interactive viewer to mark failure-region [start_t, end_t] for transition_val JSON.
 
-Plays agentview in slow motion (optional autoplay) or step frame-by-frame, shows timestep,
-and binds start/end per demo. Merges JSON on 'w' / 's' and on exit.
+Plays agentview in slow motion (autoplay on by default; Space pauses) or step frame-by-frame
+with --no-autoplay, shows timestep, and binds start/end per demo. Merges JSON on 'w' / 's'
+and on exit.
 
 Usage:
     cd imitation/imitation
@@ -21,7 +22,7 @@ Keybinds (window must be focused):
     w            Write this demo's region to JSON (needs start and end)
     s            Save full JSON (all regions in memory)
     r            Clear start/end for current demo only
-    Space        Toggle slow autoplay (--fps)
+    Space        Toggle slow autoplay (--fps); starts ON unless --no-autoplay
     q  or  ESC   Quit and save full JSON
 
 Requires a display (OpenCV highgui).
@@ -77,8 +78,8 @@ def draw_frame(
         f"t = {t} / {total_steps - 1}   (len={total_steps})",
         f"start_t = {start_t if start_t is not None else '---'}   "
         f"end_t = {end_t if end_t is not None else '---'}",
-        f"autoplay: {'ON' if autoplay else 'off'}  ({fps:.1f} fps)",
-        "[ ] set start/end   w write demo   s save all   r clear   n/p demo   ,/. or k/l frame",
+        f"autoplay: {'ON' if autoplay else 'OFF (Space=play, . or l=step)'}  ({fps:.1f} fps)",
+        "[ ] start/end   w demo   s all   r clear   n/p demo   ,/. k/l frame",
     ]
     for line in lines:
         cv2.putText(
@@ -213,6 +214,11 @@ def run(args: argparse.Namespace) -> None:
         delay_ms = max(1, int(1000.0 / fps))
 
         win = "Demo labeling (transition regions)"
+        if not autoplay:
+            print(
+                "Autoplay is OFF: the view stays on one frame until you press a key. "
+                "Press Space to play, or . / l to advance one frame (window must be focused)."
+            )
 
         while True:
             demo_key = demos[demo_idx]
@@ -317,8 +323,13 @@ def main() -> None:
         help="file_idx in each failure_regions entry (ClassifierDataset data_paths index)",
     )
     parser.add_argument("--start_demo", type=int, default=0, help="Initial demo index (0-based)")
-    parser.add_argument("--fps", type=float, default=4.0, help="Autoplay FPS when Space is ON")
-    parser.add_argument("--autoplay", action="store_true", help="Start with autoplay ON")
+    parser.add_argument("--fps", type=float, default=4.0, help="Autoplay FPS while autoplay is ON")
+    parser.add_argument(
+        "--autoplay",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Start with autoplay on (default). Use --no-autoplay to stay on one frame until keys.",
+    )
     args = parser.parse_args()
 
     if args.output is None:

@@ -18,8 +18,15 @@ class ClassifierDataset(torch.utils.data.Dataset):
     Labels: 1.0 success demo, 0.0 failure demo. Splits are by whole demos only.
 
     Optional 3-way split: set n_val_demos_per_class and n_test_demos_per_class (e.g. 30, 30).
-    Optional hard val/test: hard_val_json / hard_test_json (absolute paths) with failure_regions;
-      index = critical failure anchors + matched random success anchors (N_pos = N_neg).
+    Optional hard val/test: hard_val_json / hard_test_json (paths) with failure_regions.
+      Negative val/test rows are only timesteps inside those JSON intervals (not a random
+      % of failure demos). Each (file_idx, demo_key) in the JSON must exist as a failure
+      trajectory in data_paths. Positive rows are random anchors from the val/test success
+      split only, matched 1:1 to negatives.
+
+    Leakage: by default (exclude_hard_json_failures_from_train=True), any failure
+    (file_idx, demo_key) that appears in hard_val_json or hard_test_json is removed
+    from the train failure demo list so those trajectories are not trained on.
     """
 
     SPLIT = AttrDict(train=0.80, val=0.20)
@@ -72,6 +79,11 @@ class ClassifierDataset(torch.utils.data.Dataset):
         self.hard_val_json = os.path.expanduser(hard_val_json) if hard_val_json else None
         self.hard_test_json = os.path.expanduser(hard_test_json) if hard_test_json else None
 
+        kwargs.pop("hard_json_neg_demo_pool", None)
+        self.exclude_hard_json_failures_from_train = bool(
+            kwargs.pop("exclude_hard_json_failures_from_train", True)
+        )
+
         self._build_index()
         self._cache_low_dim()
         self._compute_normalization_stats(list(obs_keys_to_normalize.keys()))
@@ -87,12 +99,42 @@ class ClassifierDataset(torch.utils.data.Dataset):
             data = json.load(f)
         return data.get('failure_regions', data)
 
-    def _build_index_hard(self, json_path, pos_pool, neg_pool):
+    def _hard_json_excluded_failure_demos(self):
+        """(file_idx, demo_key) union from existing hard val/test JSON files."""
+        out = set()
+        for path in (self.hard_val_json, self.hard_test_json):
+            if path and os.path.isfile(path):
+                for r in self._load_hard_json(path):
+                    out.add((int(r["file_idx"]), r["demo_key"]))
+        return out
+
+    def _filter_neg_train(self, neg_train, excluded):
+        if not excluded or not self.exclude_hard_json_failures_from_train:
+            return neg_train
+        out = [d for d in neg_train if (d[0], d[1]) not in excluded]
+        n_drop = len(neg_train) - len(out)
+        if n_drop:
+            print(
+                f"ClassifierDataset [{self.split}]: excluding {n_drop} failure demo(s) "
+                f"listed in hard val/test JSON from training negatives"
+            )
+        if not out:
+            raise ValueError(
+                "All failure demos in the train split are listed in hard_val_json / "
+                "hard_test_json; nothing left for training negatives. "
+                "Lower the val/test fraction, add more failure data, or set "
+                "exclude_hard_json_failures_from_train=False."
+            )
+        return out
+
+    def _build_index_hard(self, json_path, pos_pool, neg_demos_all):
         """
         pos_pool: val/test success demos (file_idx, demo_key, demo_len).
-        neg_pool: val/test failure demos — JSON failure demos must belong here.
+
+        neg_demos_all: every failure trajectory in data_paths (used only to verify JSON
+        demo keys exist). Negative index rows are built solely from JSON [start_t, end_t].
         """
-        neg_demo_set = {(fi, dk) for fi, dk, _ in neg_pool}
+        neg_demo_set = {(fi, dk) for fi, dk, _ in neg_demos_all}
         if not pos_pool:
             raise ValueError("Hard eval requires at least one success demo in this split")
 
@@ -105,7 +147,8 @@ class ClassifierDataset(torch.utils.data.Dataset):
             end_t = int(r['end_t'])
             if (file_idx, demo_key) not in neg_demo_set:
                 raise ValueError(
-                    f"Annotated failure ({file_idx}, {demo_key}) not in this split's failure pool"
+                    f"Annotated failure ({file_idx}, {demo_key}) not found among failure trajectories "
+                    f"in data_paths"
                 )
             for t in range(start_t, end_t + 1):
                 neg_entries.append((file_idx, demo_key, t, 0.0))
@@ -179,15 +222,17 @@ class ClassifierDataset(torch.utils.data.Dataset):
             neg_train, neg_val, neg_test = split_three(neg_demos)
 
             if self.split == 'train':
-                selected = [(d, 1.0) for d in pos_train] + [(d, 0.0) for d in neg_train]
+                excluded = self._hard_json_excluded_failure_demos()
+                neg_train_f = self._filter_neg_train(neg_train, excluded)
+                selected = [(d, 1.0) for d in pos_train] + [(d, 0.0) for d in neg_train_f]
             elif self.split == 'val':
                 if self.hard_val_json and os.path.isfile(self.hard_val_json):
-                    self._build_index_hard(self.hard_val_json, pos_val, neg_val)
+                    self._build_index_hard(self.hard_val_json, pos_val, neg_demos)
                     return
                 selected = [(d, 1.0) for d in pos_val] + [(d, 0.0) for d in neg_val]
             elif self.split == 'test':
                 if self.hard_test_json and os.path.isfile(self.hard_test_json):
-                    self._build_index_hard(self.hard_test_json, pos_test, neg_test)
+                    self._build_index_hard(self.hard_test_json, pos_test, neg_demos)
                     return
                 selected = [(d, 1.0) for d in pos_test] + [(d, 0.0) for d in neg_test]
             else:
@@ -206,10 +251,12 @@ class ClassifierDataset(torch.utils.data.Dataset):
             neg_train, neg_val = split_two(neg_demos)
 
             if self.split == 'train':
-                selected = [(d, 1.0) for d in pos_train] + [(d, 0.0) for d in neg_train]
+                excluded = self._hard_json_excluded_failure_demos()
+                neg_train_f = self._filter_neg_train(neg_train, excluded)
+                selected = [(d, 1.0) for d in pos_train] + [(d, 0.0) for d in neg_train_f]
             else:
                 if self.hard_val_json and os.path.isfile(self.hard_val_json):
-                    self._build_index_hard(self.hard_val_json, pos_val, neg_val)
+                    self._build_index_hard(self.hard_val_json, pos_val, neg_demos)
                     return
                 selected = [(d, 1.0) for d in pos_val] + [(d, 0.0) for d in neg_val]
 

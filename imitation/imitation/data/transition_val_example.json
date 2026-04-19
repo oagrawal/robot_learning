@@ -1,22 +1,218 @@
 {
   "version": 1,
-  "description": "Hard val/test: failure anchor timesteps t where start_t <= t <= end_t (inclusive). file_idx matches data_config.data order (0 = first HDF5, 1 = second, ...).",
-  "hdf5_path": "/absolute/path/to/your/failure_dense_labeled_1000.hdf5",
+  "description": "failure_regions: inclusive [start_t, end_t] per demo for hard val/test",
+  "hdf5_path": "/home/ayuj/robot_learning/imitation/imitation/data/failure_185_negative.hdf5",
   "file_idx": 1,
   "failure_regions": [
     {
       "file_idx": 1,
       "demo_key": "demo_0",
-      "start_t": 118,
-      "end_t": 132,
-      "notes": "Replace with your demo_key and timesteps from visualize_demo_labeling.py"
+      "start_t": 49,
+      "end_t": 95,
+      "notes": ""
+    },
+    {
+      "file_idx": 1,
+      "demo_key": "demo_2",
+      "start_t": 112,
+      "end_t": 121,
+      "notes": ""
     },
     {
       "file_idx": 1,
       "demo_key": "demo_1",
-      "start_t": 125,
-      "end_t": 125,
-      "notes": "Single-timestep region: start_t == end_t is valid"
+      "start_t": 38,
+      "end_t": 54,
+      "notes": ""
+    },
+    {
+      "file_idx": 1,
+      "demo_key": "demo_3",
+      "start_t": 33,
+      "end_t": 74,
+      "notes": ""
+    },
+    {
+      "file_idx": 1,
+      "demo_key": "demo_4",
+      "start_t": 48,
+      "end_t": 87,
+      "notes": ""
+    },
+    {
+      "file_idx": 1,
+      "demo_key": "demo_5",
+      "start_t": 48,
+      "end_t": 71,
+      "notes": ""
+    },
+    {
+      "file_idx": 1,
+      "demo_key": "demo_6",
+      "start_t": 120,
+      "end_t": 155,
+      "notes": ""
+    },
+    {
+      "file_idx": 1,
+      "demo_key": "demo_7",
+      "start_t": 33,
+      "end_t": 75,
+      "notes": ""
+    },
+    {
+      "file_idx": 1,
+      "demo_key": "demo_8",
+      "start_t": 103,
+      "end_t": 133,
+      "notes": ""
+    },
+    {
+      "file_idx": 1,
+      "demo_key": "demo_9",
+      "start_t": 33,
+      "end_t": 69,
+      "notes": ""
+    },
+    {
+      "file_idx": 1,
+      "demo_key": "demo_10",
+      "start_t": 32,
+      "end_t": 69,
+      "notes": ""
+    },
+    {
+      "file_idx": 1,
+      "demo_key": "demo_11",
+      "start_t": 107,
+      "end_t": 160,
+      "notes": ""
+    },
+    {
+      "file_idx": 1,
+      "demo_key": "demo_12",
+      "start_t": 116,
+      "end_t": 131,
+      "notes": ""
+    },
+    {
+      "file_idx": 1,
+      "demo_key": "demo_13",
+      "start_t": 154,
+      "end_t": 167,
+      "notes": ""
+    },
+    {
+      "file_idx": 1,
+      "demo_key": "demo_14",
+      "start_t": 54,
+      "end_t": 76,
+      "notes": ""
+    },
+    {
+      "file_idx": 1,
+      "demo_key": "demo_15",
+      "start_t": 101,
+      "end_t": 112,
+      "notes": ""
+    },
+    {
+      "file_idx": 1,
+      "demo_key": "demo_17",
+      "start_t": 47,
+      "end_t": 75,
+      "notes": ""
+    },
+    {
+      "file_idx": 1,
+      "demo_key": "demo_18",
+      "start_t": 67,
+      "end_t": 81,
+      "notes": ""
+    },
+    {
+      "file_idx": 1,
+      "demo_key": "demo_19",
+      "start_t": 54,
+      "end_t": 92,
+      "notes": ""
+    },
+    {
+      "file_idx": 1,
+      "demo_key": "demo_20",
+      "start_t": 135,
+      "end_t": 149,
+      "notes": ""
+    },
+    {
+      "file_idx": 1,
+      "demo_key": "demo_21",
+      "start_t": 59,
+      "end_t": 77,
+      "notes": ""
+    },
+    {
+      "file_idx": 1,
+      "demo_key": "demo_22",
+      "start_t": 100,
+      "end_t": 109,
+      "notes": ""
+    },
+    {
+      "file_idx": 1,
+      "demo_key": "demo_23",
+      "start_t": 106,
+      "end_t": 136,
+      "notes": ""
+    },
+    {
+      "file_idx": 1,
+      "demo_key": "demo_24",
+      "start_t": 101,
+      "end_t": 115,
+      "notes": ""
+    },
+    {
+      "file_idx": 1,
+      "demo_key": "demo_25",
+      "start_t": 104,
+      "end_t": 127,
+      "notes": ""
+    },
+    {
+      "file_idx": 1,
+      "demo_key": "demo_26",
+      "start_t": 48,
+      "end_t": 74,
+      "notes": ""
+    },
+    {
+      "file_idx": 1,
+      "demo_key": "demo_27",
+      "start_t": 171,
+      "end_t": 179,
+      "notes": ""
+    },
+    {
+      "file_idx": 1,
+      "demo_key": "demo_28",
+      "start_t": 91,
+      "end_t": 92,
+      "notes": ""
+    },
+    {
+      "file_idx": 1,
+      "demo_key": "demo_29",
+      "start_t": 56,
+      "end_t": 72,
+      "notes": ""
+    },
+    {
+      "file_idx": 1,
+      "demo_key": "demo_16",
+      "start_t": 177,
+      "end_t": 184,
+      "notes": ""
     }
   ]
 }

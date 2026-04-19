@@ -1,9 +1,18 @@
-from imitation.utils.general_utils import AttrDict
+import os
+
+from collections import OrderedDict
+
+import torch.nn as nn
+
+from imitation.data.classifier_dataset import ClassifierDataset
 from imitation.models.image_nets import ResNet18, SpatialSoftmax
 from imitation.models.obs_nets import VisionCore
-from imitation.data.classifier_dataset import ClassifierDataset
-import torch.nn as nn
-from collections import OrderedDict
+from imitation.utils.general_utils import AttrDict
+
+# HDF5s and transition JSON live next to this package: imitation/imitation/data/
+_DATA_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data"))
+# Requires a success (positive) dataset at square_d0.hdf5 with the same obs/action layout
+# as the failure file (see observation_config keys).
 
 # Match FlowPolicy: 2 obs frames, 8 action chunk (see flow_policy_config.py)
 classifier_config = AttrDict(
@@ -26,8 +35,8 @@ train_config = AttrDict(
 
 data_config = AttrDict(
     data=[
-        "./data/square_d0.hdf5",
-        "./data/failure_dense_labeled_1000.hdf5",
+        os.path.join(_DATA_DIR, "square_d0.hdf5"),
+        os.path.join(_DATA_DIR, "failure_185_negative.hdf5"),
     ],
     dataset_class=ClassifierDataset,
     dataset_kwargs=dict(
@@ -35,12 +44,15 @@ data_config = AttrDict(
         n_obs_steps=2,
         action_chunk_size=8,
         max_demo_len=None,
-        n_val_demos_per_class=30,
-        n_test_demos_per_class=30,
+        # No fixed test split: train_classifier only builds a test loader when both are set.
+        n_val_demos_per_class=None,
+        n_test_demos_per_class=None,
         ablation_mode="action_and_state",
         hard_eval_seed=42,
-        hard_val_json=None,
+        hard_val_json=os.path.join(_DATA_DIR, "transition_val_example.json"),
         hard_test_json=None,
+        # Do not train on failure trajectories that appear in the hard JSON (avoids leakage).
+        exclude_hard_json_failures_from_train=True,
     ),
 )
 
