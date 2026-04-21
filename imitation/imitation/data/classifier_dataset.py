@@ -17,19 +17,40 @@ class ClassifierDataset(torch.utils.data.Dataset):
 
     Labels: 1.0 success demo, 0.0 failure demo. Splits are by whole demos only.
 
-    Optional 3-way split: set n_val_demos_per_class and n_test_demos_per_class (e.g. 30, 30).
-    Optional hard val/test: hard_val_json / hard_test_json (paths) with failure_regions.
-      Negative val/test rows are only timesteps inside those JSON intervals (not a random
-      % of failure demos). Each (file_idx, demo_key) in the JSON must exist as a failure
-      trajectory in data_paths. Positive rows are random anchors from the val/test success
-      split only, matched 1:1 to negatives.
+    Split strategies (set split_strategy):
 
-    Leakage: by default (exclude_hard_json_failures_from_train=True), any failure
-    (file_idx, demo_key) that appears in hard_val_json or hard_test_json is removed
-    from the train failure demo list so those trajectories are not trained on.
+      'two_way' (default):
+          80/20 demo-level split; train vs val for both classes. If hard_val_json
+          is set, val uses JSON windows as negatives + matched sampled positives
+          from the 20% val pool.
+
+      'three_way_demo_counts':
+          Uses n_val_demos_per_class and n_test_demos_per_class to set fixed
+          per-class counts. If hard_val_json / hard_test_json are set, val / test
+          pull negatives from the respective JSON windows + matched sampled
+          positives from the val / test pos splits.
+
+      'three_way_hard_val' (leakage-free JSON val + 80/10/10 positives):
+          - Positives (success demos): shuffle with seed 42 -> 80% train / 10%
+            val-pool / 10% test (disjoint).
+          - Negatives (failure demos): demos listed in hard_val_json are the val
+            negatives (timesteps only inside [start_t, end_t] per demo). Remaining
+            failure demos (NOT in the JSON) are shuffled with seed 42 and split
+            80% train / 20% test.
+          - train: 80% pos + 80% non-JSON neg (all timesteps).
+          - val:   JSON neg windows + same count of random pos anchors from the
+                   10% val pool.
+          - test:  ALL timesteps of the 10% pos test pool (label 1) + ALL
+                   timesteps of the 20% non-JSON neg test pool (label 0).
+
+    Leakage: with 'three_way_hard_val' the train / val / test demo sets are
+    pairwise disjoint by construction and verified at build time.
     """
 
     SPLIT = AttrDict(train=0.80, val=0.20)
+
+    POS_THREE_WAY_FRACS = (0.80, 0.10, 0.10)  # train / val-pool / test
+    NEG_NON_JSON_TRAIN_FRAC = 0.80            # train among non-JSON failures
 
     def __init__(
         self,
@@ -47,6 +68,7 @@ class ClassifierDataset(torch.utils.data.Dataset):
         hard_test_json=None,
         ablation_mode='action_and_state',
         hard_eval_seed=42,
+        split_strategy=None,
         **kwargs,
     ):
         super().__init__()
@@ -83,6 +105,24 @@ class ClassifierDataset(torch.utils.data.Dataset):
         self.exclude_hard_json_failures_from_train = bool(
             kwargs.pop("exclude_hard_json_failures_from_train", True)
         )
+
+        if split_strategy is None:
+            if (
+                n_val_demos_per_class is not None
+                and n_test_demos_per_class is not None
+            ):
+                split_strategy = 'three_way_demo_counts'
+            else:
+                split_strategy = 'two_way'
+        if split_strategy not in (
+            'two_way', 'three_way_demo_counts', 'three_way_hard_val'
+        ):
+            raise ValueError(f"Unknown split_strategy {split_strategy!r}")
+        self.split_strategy = split_strategy
+
+        # Populated by the three_way_hard_val branch so downstream tools
+        # (visualizer, leakage checks) can introspect split membership.
+        self.split_demos = None
 
         self._build_index()
         self._cache_low_dim()
@@ -181,13 +221,9 @@ class ClassifierDataset(torch.utils.data.Dataset):
                 self.index.append((file_idx, demo_key, t, label))
         self._build_sample_weights()
 
-    def _build_index(self):
-        self.index = []
-        self.hdf5_use_swmr = True
-
+    def _enumerate_demos(self):
         pos_demos = []
         neg_demos = []
-
         for file_idx, path in enumerate(self.hdf5_paths):
             is_pos = file_idx < self.num_pos
             with h5py.File(path, 'r', swmr=True, libver='latest') as f:
@@ -199,13 +235,23 @@ class ClassifierDataset(torch.utils.data.Dataset):
                         pos_demos.append(entry)
                     else:
                         neg_demos.append(entry)
+        return pos_demos, neg_demos
+
+    def _build_index(self):
+        self.index = []
+        self.hdf5_use_swmr = True
+
+        pos_demos, neg_demos = self._enumerate_demos()
 
         rng = np.random.RandomState(42)
         rng.shuffle(pos_demos)
         rng.shuffle(neg_demos)
 
-        use_three = self._three_way_split()
-        if use_three:
+        if self.split_strategy == 'three_way_hard_val':
+            self._build_index_three_way_hard_val(pos_demos, neg_demos)
+            return
+
+        if self.split_strategy == 'three_way_demo_counts':
             n_val = int(self.n_val_demos_per_class)
             n_test = int(self.n_test_demos_per_class)
 
@@ -237,10 +283,11 @@ class ClassifierDataset(torch.utils.data.Dataset):
                 selected = [(d, 1.0) for d in pos_test] + [(d, 0.0) for d in neg_test]
             else:
                 raise ValueError(f"Unknown split {self.split}")
-        else:
+        else:  # 'two_way'
             if self.split == 'test':
                 raise ValueError(
-                    "split='test' requires n_val_demos_per_class and n_test_demos_per_class"
+                    "split='test' requires split_strategy='three_way_demo_counts' "
+                    "or 'three_way_hard_val'"
                 )
 
             def split_two(demos):
@@ -261,6 +308,108 @@ class ClassifierDataset(torch.utils.data.Dataset):
                 selected = [(d, 1.0) for d in pos_val] + [(d, 0.0) for d in neg_val]
 
         self._build_index_standard(selected)
+
+    def _build_index_three_way_hard_val(self, pos_demos, neg_demos):
+        if not self.hard_val_json or not os.path.isfile(self.hard_val_json):
+            raise ValueError(
+                "split_strategy='three_way_hard_val' requires a valid hard_val_json path"
+            )
+
+        # ---- Positives: 80% train / 10% val-pool / 10% test (disjoint). ----
+        n_pos = len(pos_demos)
+        f_train, f_val, _ = self.POS_THREE_WAY_FRACS
+        n_pos_train = int(round(f_train * n_pos))
+        n_pos_val = int(round(f_val * n_pos))
+        n_pos_test = n_pos - n_pos_train - n_pos_val
+        if n_pos_val < 1 or n_pos_test < 1 or n_pos_train < 1:
+            raise ValueError(
+                f"Not enough success demos ({n_pos}) for 80/10/10 split "
+                f"(got train={n_pos_train}, val={n_pos_val}, test={n_pos_test})"
+            )
+        pos_train = pos_demos[:n_pos_train]
+        pos_val_pool = pos_demos[n_pos_train:n_pos_train + n_pos_val]
+        pos_test = pos_demos[n_pos_train + n_pos_val:]
+
+        # ---- Negatives: JSON demos are val; non-JSON shuffled 80% train / 20% test. ----
+        json_keys = self._hard_val_json_keys()
+        neg_all_keys = {(fi, dk) for fi, dk, _ in neg_demos}
+        missing = [k for k in json_keys if k not in neg_all_keys]
+        if missing:
+            raise ValueError(
+                f"{len(missing)} JSON failure demo(s) not found in failure hdf5: "
+                f"first few = {missing[:3]}"
+            )
+
+        neg_val_demos = [d for d in neg_demos if (d[0], d[1]) in json_keys]
+        neg_non_json = [d for d in neg_demos if (d[0], d[1]) not in json_keys]
+        n_nj = len(neg_non_json)
+        n_neg_train = int(round(self.NEG_NON_JSON_TRAIN_FRAC * n_nj))
+        if n_neg_train < 1 or (n_nj - n_neg_train) < 1:
+            raise ValueError(
+                f"Not enough non-JSON failure demos ({n_nj}) to split 80/20 "
+                f"(got train={n_neg_train}, test={n_nj - n_neg_train})"
+            )
+        neg_train = neg_non_json[:n_neg_train]
+        neg_test = neg_non_json[n_neg_train:]
+
+        # ---- Leakage check: pairwise-disjoint by (file_idx, demo_key). ----
+        def _ks(demos):
+            return {(fi, dk) for fi, dk, _ in demos}
+        sets = {
+            'pos_train': _ks(pos_train),
+            'pos_val_pool': _ks(pos_val_pool),
+            'pos_test': _ks(pos_test),
+            'neg_train': _ks(neg_train),
+            'neg_val': _ks(neg_val_demos),
+            'neg_test': _ks(neg_test),
+        }
+        names = list(sets)
+        for i, a in enumerate(names):
+            for b in names[i + 1:]:
+                overlap = sets[a] & sets[b]
+                if overlap:
+                    raise RuntimeError(
+                        f"Demo leakage: {a} and {b} share {len(overlap)} demo(s); "
+                        f"first few = {list(overlap)[:3]}"
+                    )
+
+        self.split_demos = {
+            'pos_train': list(pos_train),
+            'pos_val_pool': list(pos_val_pool),
+            'pos_test': list(pos_test),
+            'neg_train': list(neg_train),
+            'neg_val': list(neg_val_demos),
+            'neg_test': list(neg_test),
+        }
+
+        if self.split == 'train':
+            print(
+                f"ClassifierDataset [train]: three_way_hard_val | "
+                f"pos_train={len(pos_train)} neg_train={len(neg_train)} "
+                f"(pos_val_pool={len(pos_val_pool)}, pos_test={len(pos_test)}, "
+                f"neg_val_json={len(neg_val_demos)}, neg_test={len(neg_test)})"
+            )
+            selected = [(d, 1.0) for d in pos_train] + [(d, 0.0) for d in neg_train]
+            self._build_index_standard(selected)
+        elif self.split == 'val':
+            self._build_index_hard(self.hard_val_json, pos_val_pool, neg_demos)
+        elif self.split == 'test':
+            print(
+                f"ClassifierDataset [test]: three_way_hard_val | "
+                f"pos_test_demos={len(pos_test)} neg_test_demos={len(neg_test)}"
+            )
+            selected = [(d, 1.0) for d in pos_test] + [(d, 0.0) for d in neg_test]
+            self._build_index_standard(selected)
+        else:
+            raise ValueError(f"Unknown split {self.split}")
+
+    def _hard_val_json_keys(self):
+        if not self.hard_val_json or not os.path.isfile(self.hard_val_json):
+            return set()
+        return {
+            (int(r["file_idx"]), r["demo_key"])
+            for r in self._load_hard_json(self.hard_val_json)
+        }
 
     def _build_sample_weights(self):
         labels = np.array([entry[3] for entry in self.index])

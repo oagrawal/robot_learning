@@ -44,14 +44,19 @@ data_config = AttrDict(
         n_obs_steps=2,
         action_chunk_size=8,
         max_demo_len=None,
-        # No fixed test split: train_classifier only builds a test loader when both are set.
+        # three_way_hard_val split (see ClassifierDataset docstring):
+        #   pos: 80% train / 10% val-pool / 10% test (disjoint success demos).
+        #   neg: JSON demos -> val (windows in [start_t, end_t] only); non-JSON
+        #        failures shuffled -> 80% train / 20% test.
+        split_strategy='three_way_hard_val',
         n_val_demos_per_class=None,
         n_test_demos_per_class=None,
         ablation_mode="action_and_state",
         hard_eval_seed=42,
         hard_val_json=os.path.join(_DATA_DIR, "transition_val_example.json"),
         hard_test_json=None,
-        # Do not train on failure trajectories that appear in the hard JSON (avoids leakage).
+        # JSON val failures are never in the train set under 'three_way_hard_val'
+        # (they are placed directly into val), so this flag is redundant there.
         exclude_hard_json_failures_from_train=True,
     ),
 )

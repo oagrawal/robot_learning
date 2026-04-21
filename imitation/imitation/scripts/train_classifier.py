@@ -183,12 +183,16 @@ def main(args):
     train_dataset = data_config.dataset_class(data_paths=data_config.data, split='train', **ds_kwargs)
     val_dataset = data_config.dataset_class(data_paths=data_config.data, split='val', **ds_kwargs)
 
-    three_way = (
-        ds_kwargs.get('n_val_demos_per_class') is not None
-        and ds_kwargs.get('n_test_demos_per_class') is not None
+    split_strategy = ds_kwargs.get('split_strategy')
+    has_test_split = (
+        split_strategy in ('three_way_demo_counts', 'three_way_hard_val')
+        or (
+            ds_kwargs.get('n_val_demos_per_class') is not None
+            and ds_kwargs.get('n_test_demos_per_class') is not None
+        )
     )
     test_dataset = None
-    if three_way:
+    if has_test_split:
         test_dataset = data_config.dataset_class(data_paths=data_config.data, split='test', **ds_kwargs)
 
     train_sampler = WeightedRandomSampler(
@@ -324,14 +328,39 @@ def main(args):
         if (epoch + 1) % train_config.save_every_n_epochs == 0:
             model.save(os.path.join(exp_dir, f'classifier_ep{epoch+1}.pth'))
 
+    model.save(os.path.join(exp_dir, 'classifier_final.pth'))
+
     if test_loader is not None:
+        best_ckpt = os.path.join(exp_dir, 'best_classifier.pth')
+        if os.path.isfile(best_ckpt):
+            print(f"\nLoading best checkpoint (val AUC={best_auc:.3f}) for final test eval: {best_ckpt}")
+            from imitation.models.trajectory_classifier import TrajectoryClassifier
+            model = TrajectoryClassifier.load(best_ckpt, device=DEVICE).to(DEVICE)
+
         test_metrics = evaluate(model, test_loader, obs_key_to_modality, val_criterion)
+        success_rate = test_metrics['accuracy']
         print(
             f"\nFinal test | loss: {test_metrics['loss']:.4f} | "
-            f"Acc: {test_metrics['accuracy']:.3f} | AUC: {test_metrics['auc']:.3f}"
+            f"Success rate (per-window acc @ 0.5): {success_rate:.4f} | "
+            f"AUC: {test_metrics['auc']:.4f}"
         )
+        if logger:
+            logger.log_scalar_dict(
+                {
+                    'test_loss': test_metrics['loss'],
+                    'test_success_rate': success_rate,
+                    'test_auc': test_metrics['auc'],
+                },
+                step=train_config.num_epochs,
+                phase='test',
+            )
+        with open(os.path.join(exp_dir, 'test_success_rate.txt'), 'w') as f:
+            f.write(
+                f"test_loss={test_metrics['loss']:.6f}\n"
+                f"test_success_rate={success_rate:.6f}\n"
+                f"test_auc={test_metrics['auc']:.6f}\n"
+            )
 
-    model.save(os.path.join(exp_dir, 'classifier_final.pth'))
     print(f"\nTraining complete. Best val AUC: {best_auc:.3f}")
     print(f"Models saved to: {exp_dir}")
     print(f"Trajectory plots saved to: {plot_dir}")
