@@ -334,7 +334,6 @@ def main(args):
         best_ckpt = os.path.join(exp_dir, 'best_classifier.pth')
         if os.path.isfile(best_ckpt):
             print(f"\nLoading best checkpoint (val AUC={best_auc:.3f}) for final test eval: {best_ckpt}")
-            from imitation.models.trajectory_classifier import TrajectoryClassifier
             model = TrajectoryClassifier.load(best_ckpt, device=DEVICE).to(DEVICE)
 
         test_metrics = evaluate(model, test_loader, obs_key_to_modality, val_criterion)
